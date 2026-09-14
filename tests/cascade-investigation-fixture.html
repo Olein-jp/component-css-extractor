@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CSS Cascade 調査用ページ</title>
+  <style>
+    body { max-width: 48rem; margin: 2rem auto; padding: 0 1rem; font-family: system-ui, sans-serif; line-height: 1.6; }
+    section { margin: 2rem 0; padding-top: 1rem; border-top: 1px solid #ccc; }
+    [data-test-target] { display: block; padding: 1rem; outline: 2px dashed #888; outline-offset: 3px; }
+
+    @layer first, second;
+    @layer second { .layer-target { color: blue; } }
+    @layer first { .layer-target { color: red; } }
+
+    .where-target { color: blue; }
+    .where-target:where(:hover) { color: red; }
+
+    .inline-target { color: blue; }
+
+    .inheritance-parent { color: purple; }
+    .inheritance-target { font-weight: 700; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>CSS Cascade 調査用ページ</h1>
+    <p>この HTML ファイルを Chrome で直接開けます。各点線枠の要素を Elements パネルで選択し、CSS Extractor の「選択要素のみ」、ルートクラス <code>component-test</code> で解析してください。</p>
+
+    <section>
+      <h2>1. レイヤーの順序</h2>
+      <div class="layer-target" data-test-target="layer">青い文字。元 CSS では first より second が優先されます。</div>
+      <p>現行の抽出結果は <code>@layer first, second;</code> を含まず、second と first のブロックだけになります。その CSS を別ページに貼るとレイヤー順が逆転して赤くなります。</p>
+    </section>
+
+    <section>
+      <h2>2. :where() 内の状態</h2>
+      <div class="where-target" data-test-target="where">普段は青、マウスを載せると赤い文字。</div>
+      <p>マウスを載せていない状態で選択・解析すると、現行の抽出結果には <code>:where(:hover)</code> のルールが入りません。出力先ではマウスを載せても青いままです。</p>
+    </section>
+
+    <section>
+      <h2>3. インラインスタイル</h2>
+      <div class="inline-target" style="color: red" data-test-target="inline">赤い文字。CSS ルールは青、style 属性は赤。</div>
+      <p>現行の抽出 CSS は青いルールだけです。HTML と CSS を両方コピーすれば style 属性が残るため赤を再現できますが、CSS だけを別の HTML に使うと青になります。</p>
+    </section>
+
+    <section>
+      <h2>4. 選択範囲外からの継承</h2>
+      <div class="inheritance-parent">
+        <div class="inheritance-target" data-test-target="inheritance">紫で太字の文字。色は親要素から継承しています。</div>
+      </div>
+      <p>子要素だけを選択すると、現行の抽出結果には太字のルールだけが入り、コピー先で紫色を再現できません。</p>
+    </section>
+  </main>
+</body>
+</html>
