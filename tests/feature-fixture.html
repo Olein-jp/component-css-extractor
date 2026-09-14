@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Component CSS Extractor 機能テスト</title>
+  <style>
+    /* このページの案内用。クラスを使わないため、抽出結果には含まれません。 */
+    body { max-width: 52rem; margin: 2rem auto; padding: 0 1rem; font-family: system-ui, sans-serif; line-height: 1.6; }
+    section { margin: 2rem 0; padding-top: 1rem; border-top: 1px solid #ccc; }
+    [data-test-target] { display: block; margin: 1rem 0; outline: 2px dashed #888; outline-offset: 4px; }
+    code { background: #f1f1f1; padding: 0.1em 0.25em; }
+
+    /* 1. 選択要素の外にある親クラスを安全に変換できるか。 */
+    .fixture-pad { padding: 1rem; }
+    @media (min-width: 700px) {
+      .fixture-pad { padding: 2rem; }
+    }
+    .fixture-shell > .fixture-sample[data-state="ready"] { color: #1765cc; }
+
+    /* 2. パネルに入力するクラス。ページ上の要素には付けません。 */
+    .manual-pad { padding: 1rem; }
+    .manual-strong { font-weight: 700; }
+
+    /* 3. 親要素と子要素に別々のルールを付けます。 */
+    .fixture-card-pad { padding: 1.5rem; }
+    .fixture-card-bg { background-color: #edf4ff; }
+    .fixture-title-size { font-size: 1.25rem; }
+    .fixture-title-weight { font-weight: 700; }
+    .fixture-body-color { color: #4b5563; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Component CSS Extractor 機能テスト</h1>
+    <p>この HTML ファイルを Chrome で直接開いてください。サーバーは不要です。DevTools の Elements パネルで指定の要素を選び、CSS Extractor パネルで解析します。</p>
+
+    <section>
+      <h2>1. 先ほどの修正：外側の親クラスを除いた出力</h2>
+      <ol>
+        <li>下の「テスト対象 1」を右クリックして「検証」を選びます。青い文字の <code>div.fixture-sample</code> が選択対象です。</li>
+        <li>CSS Extractor で「Elementsで選択」、範囲は「選択要素のみ」、ルートのクラス名は <code>component-test</code> にして解析します。</li>
+      </ol>
+      <div class="fixture-shell">
+        <div class="fixture-sample fixture-pad" data-state="ready" data-test-target="complex">テスト対象 1：この青い文字の div を選択</div>
+      </div>
+      <p>期待結果：HTML は <code>class="component-test"</code> と <code>data-state="ready"</code> を持ちます。CSS に <code>.component-test[data-state="ready"]</code> の色、通常の余白、<code>@media (min-width: 700px)</code> 内の余白が出ます。<code>.fixture-shell &gt; .fixture-sample</code> は残らず、外側への依存を示す警告も出ません。余白が上下左右に分かれて表示されても正常です。</p>
+    </section>
+
+    <section>
+      <h2>2. クラスを入力して解析</h2>
+      <ol>
+        <li>CSS Extractor で「クラスを入力」を選び、クラス名欄に <code>manual-pad manual-strong</code> と入力します。Elements パネルでの要素選択は不要です。</li>
+        <li>ルートのクラス名を <code>manual-result</code> にして解析します。</li>
+      </ol>
+      <p>期待結果：CSS に <code>.manual-result</code> の <code>padding</code> と <code>font-weight: 700</code> が出ます。手入力では元の HTML がないため、HTML 欄が空なのは正常です。</p>
+    </section>
+
+    <section>
+      <h2>3. 子要素を含めて解析</h2>
+      <ol>
+        <li>下の薄い青色のカード全体を右クリックして「検証」を選び、Elements パネルで <code>div.fixture-card-pad</code> が選ばれていることを確認します。</li>
+        <li>CSS Extractor で「Elementsで選択」、範囲は「子孫要素を含む」、ルートのクラス名は <code>card-demo</code>、セレクタ方式は「コンポーネントクラスを生成」にして解析します。</li>
+      </ol>
+      <div class="fixture-card-pad fixture-card-bg" data-test-target="descendants">
+        <h3 class="fixture-title-size fixture-title-weight">テスト対象 3：カードの見出し</h3>
+        <p class="fixture-body-color">カードの説明文です。</p>
+      </div>
+      <p>期待結果：HTML に <code>card-demo</code>、<code>card-demo__title</code>、<code>card-demo__description</code> が付きます。CSS では親の余白と背景色、見出しの文字サイズと太さ、説明文の文字色が別々のセレクタで出ます。「選択要素のみ」に切り替えると、子要素の CSS は出ません。</p>
+    </section>
+  </main>
+</body>
+</html>

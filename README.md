@@ -21,6 +21,8 @@ Chrome で `chrome://extensions` を開き、デベロッパーモードを有�
 
 手動確認には [tests/manual-fixture.html](tests/manual-fixture.html) を利用できます。この HTML ファイルを Chrome にドラッグ＆ドロップするか、Chrome の「ファイルを開く」で選んでください。サーバーの起動は不要です。ページ内の「4. 複雑なセレクタとメディアクエリ」では、今回の `padding`、`@media`、複雑なセレクタを 1 ファイルで確認できます。
 
+3 つの主要操作を続けて確認するには [tests/feature-fixture.html](tests/feature-fixture.html) を Chrome で直接開いてください。親クラスの安全な変換、クラスの手入力、子要素を含む解析について、操作手順と期待結果をページ内に記載しています。
+
 別オリジンの CSS を DevTools Resource API で補完する機能自体を確認する場合だけ、リポジトリで `python3 -m http.server 8000` と `python3 -m http.server 8001` を別々のターミナルで実行し、`http://localhost:8000/tests/cross-origin-fixture.html` を開きます。このページを `file://` で開いても、外部 CSS の配信元が動いていなければ `padding` は読み込まれません。
 
 ルートのクラス名は出力用です。たとえば `card` と入力すると `.card` が生成されます。「既存の意味あるクラスを優先」では、子要素に CSS 抽出対象として使われなかったクラスがあれば、その名前を優先します。「コンポーネントクラスを生成」では `.card__title` などを作ります。「DOMセレクタを使用」では子要素に `.card > h2:nth-child(1)` のようなセレクタを使い、HTML は元のまま表示します。
