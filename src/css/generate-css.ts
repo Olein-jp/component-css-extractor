@@ -1,4 +1,5 @@
 import { escapeCssIdentifier, selectorClasses } from './selectors';
+import { varReferences } from './custom-properties';
 import type { Declaration, GeneratedOutput, OutputNode, PageSnapshot, RuleContext, SourceRule } from '../model/types';
 
 export type Strategy = 'meaningful' | 'generated' | 'dom';
@@ -105,6 +106,8 @@ export function generateOutput(snapshot: PageSnapshot, options: GenerateOptions)
   }
   const blocks: string[] = [];
   const unresolvedDependencies = new Set<string>();
+  const definedProperties = new Map<string, Set<string>>();
+  const referencedProperties: Array<{ nodeId: string; name: string; hasFallback: boolean }> = [];
   for (const node of nodes) {
     const rules = snapshot.rules.filter((rule) => rule.nodeId === node.id && ruleAllowed(rule, options))
       .sort((a, b) => a.sourceOrder - b.sourceOrder);
@@ -129,12 +132,46 @@ export function generateOutput(snapshot: PageSnapshot, options: GenerateOptions)
         }
       }
     }
-    blocks.push(...segments.filter((segment) => segment.declarations.size).map(renderSegment));
+    for (const segment of segments.filter((item) => item.declarations.size)) {
+      blocks.push(renderSegment(segment));
+      for (const declaration of segment.declarations.values()) {
+        if (declaration.property.startsWith('--')) {
+          const names = definedProperties.get(node.id) ?? new Set<string>();
+          names.add(declaration.property);
+          definedProperties.set(node.id, names);
+        }
+        for (const reference of varReferences(declaration.value)) {
+          referencedProperties.push({ nodeId: node.id, ...reference });
+        }
+      }
+    }
   }
   if (!blocks.length) warnings.push('一致するCSSルールが見つかりませんでした。');
   if (unresolvedDependencies.size) {
     const examples = [...unresolvedDependencies].slice(0, 3).map((selector) => `「${selector}」`).join('、');
     warnings.push(`${unresolvedDependencies.size} 件のセレクタは選択範囲外の要素・状態に依存します（${examples}）。コピーしたHTMLだけではスタイルを再現できない場合があります。`);
+  }
+  const nodeById = new Map(nodes.map((node) => [node.id, node]));
+  const missingByName = new Map<string, boolean>();
+  for (const reference of referencedProperties) {
+    let nodeId: string | null = reference.nodeId;
+    let found = false;
+    while (nodeId) {
+      if (definedProperties.get(nodeId)?.has(reference.name)) { found = true; break; }
+      nodeId = nodeById.get(nodeId)?.parentId ?? null;
+    }
+    if (!found) missingByName.set(reference.name, (missingByName.get(reference.name) ?? true) && reference.hasFallback);
+  }
+  const missingProperties = [...missingByName];
+  if (missingProperties.length) {
+    const examples = (items: string[]): string => items.slice(0, 3).join('、') + (items.length > 3 ? ' など' : '');
+    const withoutFallback = missingProperties.filter(([, fallback]) => !fallback).map(([name]) => name);
+    const withFallback = missingProperties.filter(([, fallback]) => fallback).map(([name]) => name);
+    const details = [
+      withoutFallback.length ? `フォールバックなし ${withoutFallback.length} 件（${examples(withoutFallback)}）` : '',
+      withFallback.length ? `フォールバックあり ${withFallback.length} 件（${examples(withFallback)}）` : '',
+    ].filter(Boolean).join('、');
+    warnings.push(`出力CSSで定義されていないカスタムプロパティがあります：${details}。コピー先では見た目が変わる場合があります。`);
   }
   return { css: blocks.join('\n\n'), html: snapshot.originalHtml, warnings, nodes };
 }

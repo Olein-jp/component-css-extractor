@@ -4,6 +4,7 @@ import { escapeCssIdentifier, isSimpleCompound, normalizeClasses, selectorClasse
 import { inspectPage, renderHtml } from '../src/inspector/inspect-page';
 import { inspect, readStyleResources } from '../src/panel/chrome';
 import { extractTopLevelImports } from '../src/css/imports';
+import { varReferences } from '../src/css/custom-properties';
 import type { Declaration, ElementNode, PageSnapshot, RuleContext, SourceRule } from '../src/model/types';
 
 describe('CSS import の抽出', () => {
@@ -16,6 +17,17 @@ describe('CSS import の抽出', () => {
     expect(result.cssText).toContain('.__component_css_import_marker_0__ { }');
     expect(result.cssText).toContain('content: "@import fake.css;"');
     expect(result.cssText).toContain('@import "nested.css"');
+  });
+});
+
+describe('CSS カスタムプロパティの参照', () => {
+  it('ネストしたフォールバックを読み、文字列とコメント内のvarは無視する', () => {
+    expect(varReferences('calc(var(--gap, var(--default-gap, 1rem)) + 1px) "var(--quoted)" /* var(--comment) */'))
+      .toEqual([{ name: '--gap', hasFallback: true }, { name: '--default-gap', hasFallback: true }]);
+    expect(varReferences('var(--direct) var(--empty,)')).toEqual([
+      { name: '--direct', hasFallback: false }, { name: '--empty', hasFallback: true },
+    ]);
+    expect(varReferences('var( /* gap */ --space , 1rem)')).toEqual([{ name: '--space', hasFallback: true }]);
   });
 });
 
@@ -40,6 +52,60 @@ function snapshot(nodes: ElementNode[], rules: SourceRule[]): PageSnapshot {
 }
 
 describe('CSS生成', () => {
+  it('外側のrootにしかない変数定義への依存を警告する', () => {
+    const page = snapshot([node('0', ['sample'])], [rule('0', '.sample', 'padding', 'var(--space)', 0)]);
+    const result = generateOutput(page, { ...options, rootClass: 'sample' });
+    expect(result.css).toContain('padding: var(--space);');
+    expect(result.warnings.join(' ')).toContain('フォールバックなし 1 件（--space）');
+  });
+
+  it('出力内の定義は警告せず、設定で定義を省いたときは警告を再計算する', () => {
+    const page = snapshot([node('0', ['sample'])], [
+      rule('0', '.sample', '--space', '1rem', 0),
+      rule('0', '.sample', 'padding', 'var(--space)', 1),
+    ]);
+    const enabled = generateOutput(page, options);
+    expect(enabled.css).toContain('--space: 1rem;');
+    expect(enabled.warnings).toEqual([]);
+    const disabled = generateOutput(page, { ...options, includeCustomProperties: false });
+    expect(disabled.css).not.toContain('--space: 1rem;');
+    expect(disabled.warnings.join(' ')).toContain('フォールバックなし 1 件（--space）');
+    expect(generateOutput(page, options).warnings).toEqual([]);
+  });
+
+  it('子要素だけの定義は親要素の参照を解決しない', () => {
+    const page = snapshot([
+      node('0', ['sample']), node('0.0', ['child'], 'span', '0'),
+    ], [
+      rule('0', '.sample', 'color', 'var(--ink)', 0),
+      rule('0.0', '.child', '--ink', 'red', 1),
+    ]);
+    const result = generateOutput(page, options);
+    expect(result.warnings.join(' ')).toContain('フォールバックなし 1 件（--ink）');
+  });
+
+  it('親要素の定義は子要素に継承されるものとして扱う', () => {
+    const page = snapshot([
+      node('0', ['sample']), node('0.0', ['child'], 'span', '0'),
+    ], [
+      rule('0', '.sample', '--ink', 'red', 0),
+      rule('0.0', '.child', 'color', 'var(--ink)', 1),
+    ]);
+    expect(generateOutput(page, options).warnings).toEqual([]);
+  });
+
+  it('フォールバックがある未定義変数と直接依存を区別し、対象外のルールは数えない', () => {
+    const page = snapshot([node('0', ['sample'])], [
+      rule('0', '.sample', 'padding', 'var(--space, 1rem)', 0),
+      rule('0', '.sample', 'color', 'var(--ink)', 1),
+      rule('0', '.sample', 'border-color', 'var(--excluded)', 2, [{ type: 'media', header: '@media print' }]),
+    ]);
+    const result = generateOutput(page, { ...options, includeMedia: false });
+    expect(result.warnings.join(' ')).toContain('フォールバックなし 1 件（--ink）');
+    expect(result.warnings.join(' ')).toContain('フォールバックあり 1 件（--space）');
+    expect(result.warnings.join(' ')).not.toContain('--excluded');
+  });
+
   it('選択範囲外の単純な親条件をルートへ変換し、HTMLとCSSを単体で使えるようにする', () => {
     const page = snapshot([node('0', ['sample', 'external-pad'])], [
       rule('0', '.external-pad', 'padding', '1rem', 0),
