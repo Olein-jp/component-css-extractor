@@ -1,0 +1,47 @@
+# Component CSS Extractor
+
+Chrome DevTools の Elements パネルで選択した要素に付いたクラスから、元の CSS ルールを収集し、コンポーネント用のセレクタへまとめる Manifest V3 拡張です。子孫要素を含めた解析、手入力したクラスの解析、CSS と HTML のコピーに対応します。ページの DOM と CSS は変更しません。
+
+## ローカルで読み込む
+
+Node.js 20 以降を用意し、リポジトリで次を実行します。
+
+```sh
+npm ci
+npm run check
+```
+
+Chrome で `chrome://extensions` を開き、デベロッパーモードを有効にして「パッケージ化されていない拡張機能を読み込む」から、このリポジトリの `dist` ディレクトリを選びます。対象ページで DevTools を開くと **CSS Extractor** パネルが追加されます。拡張を再ビルドした場合は拡張機能ページで再読み込みし、DevTools を開き直してください。
+
+## 使い方
+
+1. Elements パネルで要素を選び、**CSS Extractor** パネルを開きます。
+2. 必要に応じて「子孫要素を含む」、ルートのクラス名、セレクタ方式を設定します。クラス名を直接入力する場合は「クラスを入力」を選びます。
+3. 「解析する」を押して CSS と HTML を確認し、必要な内容をコピーします。
+
+手動確認には [tests/manual-fixture.html](tests/manual-fixture.html) を利用できます。リポジトリで `python3 -m http.server 8000` を実行し、Chrome で `http://localhost:8000/tests/manual-fixture.html` を開いてください。
+
+ルートのクラス名は出力用です。たとえば `card` と入力すると `.card` が生成されます。「既存の意味あるクラスを優先」では、子要素に CSS 抽出対象として使われなかったクラスがあれば、その名前を優先します。「コンポーネントクラスを生成」では `.card__title` などを作ります。「DOMセレクタを使用」では子要素に `.card > h2:nth-child(1)` のようなセレクタを使い、HTML は元のまま表示します。
+
+## 仕様と制限
+
+- CSSOM の `document.styleSheets` と `@import` を再帰的に読みます。別オリジンなどで読めないシートはスキップして件数を警告します。DevTools Resource API による再取得は未実装です。
+- 元 CSS にある `@media`、`@supports`、`@container`、`@layer`、一部の疑似クラス・疑似要素、CSS カスタムプロパティ、`!important` を保持します。メディアクエリは現在の表示幅に関係なく収集します。
+- 安全に書き換えられる単純なクラス複合セレクタ（例: `.foo`、`.foo.bar`、`.md\\:p-8:hover`）を対象とします。祖先・兄弟条件、属性セレクタ、`:is()`・`:not()` などの関数型セレクタ、CSS Nesting、`@scope` は省略し、警告します。
+- 完全な CSS Cascade は再現しません。同一文脈内では `!important`、単純セレクタの詳細度、元の出現順で競合を解決します。レイヤー間の順序、`:where()`、継承、インラインスタイル、アニメーションは評価しません。抽出結果を必ず確認してください。
+- 生成 HTML は選択要素を複製して作り、抽出に利用したクラスを置き換えます。解析されなかったクラスや他の属性・テキストは保持します。JavaScript が参照するクラスを CSS 抽出にも利用している場合、コピー前に HTML を確認してください。
+- 250 を超える子孫要素は先頭 250 件まで解析します。Shadow DOM と adoptedStyleSheets は対象外です。手入力モードでは実 DOM の状態を確認できないため、単純セレクタのクラス一致で抽出します。
+
+## 開発
+
+```sh
+npm run typecheck
+npm test
+npm run build
+```
+
+## GitHub Releases 向けパッケージ
+
+`npm run package:release` で `release/component-css-extractor-v0.1.0.zip` と SHA-256 チェックサムを生成します。ZIP 内の最上位フォルダを展開して、そのフォルダを Chrome の「パッケージ化されていない拡張機能を読み込む」で指定します。ZIP をそのまま Chrome に渡してインストールする方式ではありません。
+
+実装順序と Issue 分割案は [PLAN.md](PLAN.md) に記載しています。拡張にホスト権限や `tabs` 権限は付与していません。DevTools の `$0` を参照するため、`devtools_page` から `chrome.devtools.inspectedWindow.eval()` を使用します。

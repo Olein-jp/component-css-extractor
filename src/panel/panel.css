@@ -1,0 +1,38 @@
+:root { color-scheme: light dark; font: 13px/1.5 system-ui, sans-serif; }
+body { margin: 0; color: #202124; background: #f7f8fa; }
+main { max-width: 860px; margin: 0 auto; padding: 18px; }
+header { margin-bottom: 18px; }
+h1 { font-size: 20px; margin: 0 0 3px; }
+h2 { font-size: 15px; margin: 0 0 12px; }
+h3 { font-size: 13px; margin: 0; }
+p { margin: 4px 0; }
+section { background: #fff; border: 1px solid #dadce0; border-radius: 8px; padding: 16px; margin-bottom: 14px; }
+.choice-row { display: flex; flex-wrap: wrap; gap: 18px; }
+.selection { font-family: ui-monospace, monospace; padding: 10px; background: #f1f3f4; overflow-wrap: anywhere; margin-top: 12px; }
+.field { display: block; margin-top: 12px; font-weight: 600; }
+.field input, .field textarea, .field select { display: block; box-sizing: border-box; width: 100%; max-width: 430px; margin-top: 5px; padding: 7px 9px; font: inherit; border: 1px solid #b8bec7; border-radius: 4px; background: #fff; color: inherit; }
+.field textarea { resize: vertical; }
+small { color: #5f6368; }
+fieldset { border: 0; padding: 0; margin: 12px 0; }
+legend { font-weight: 600; margin-bottom: 5px; }
+fieldset label { display: inline-flex; align-items: center; margin-right: 16px; gap: 3px; }
+.options { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 6px 10px; }
+.options legend { grid-column: 1 / -1; }
+.options label { margin: 0; }
+button { font: inherit; border: 1px solid #b8bec7; border-radius: 4px; padding: 6px 11px; background: #fff; color: inherit; cursor: pointer; }
+button:hover:not(:disabled) { background: #e9edf4; }
+button:disabled { opacity: .45; cursor: default; }
+button.primary { background: #1a73e8; color: #fff; border-color: #1a73e8; padding: 8px 16px; }
+button.primary:hover:not(:disabled) { background: #1765cc; }
+.result-heading { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; }
+pre { box-sizing: border-box; min-height: 64px; overflow: auto; margin: 7px 0 14px; padding: 12px; background: #f1f3f4; border-radius: 4px; white-space: pre; }
+.warnings p { color: #9b4d00; background: #fff4dc; border-radius: 4px; padding: 7px 9px; margin: 4px 0; }
+.hidden { display: none; }
+@media (prefers-color-scheme: dark) {
+  body { color: #e8eaed; background: #202124; }
+  section { background: #292a2d; border-color: #5f6368; }
+  .selection, pre { background: #35363a; }
+  .field input, .field textarea, .field select, button { background: #35363a; border-color: #70757a; }
+  small { color: #bdc1c6; }
+  .warnings p { color: #ffd58a; background: #513c1b; }
+}

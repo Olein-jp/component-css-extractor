@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>Component CSS Extractor 手動テスト</title>
+  <style>
+    .font-size-xl { font-size: 3rem; }
+    .border-radius-s { border-radius: 10px; }
+    .font-weight-bold { font-weight: bold; }
+    @media (min-width: 600px) {
+      .font-weight-bold { font-weight: 700; }
+    }
+    .p-6 { padding: 1.5rem; }
+    .bg-white { background-color: #fff; }
+    .rounded-lg { border-radius: 0.5rem; }
+    .text-xl { font-size: 1.25rem; }
+    .font-bold { font-weight: 700; }
+    .mb-2 { margin-bottom: 0.5rem; }
+    .text-sm { font-size: 0.875rem; }
+    .text-gray-600 { color: #4b5563; }
+    .p-4 { padding: 1rem; }
+    .bold { font-weight: 700; }
+  </style>
+</head>
+<body>
+  <h1>Component CSS Extractor 手動テスト</h1>
+
+  <h2>1. 選択要素のみ</h2>
+  <div class="box font-size-xl border-radius-s font-weight-bold">この div を選択</div>
+
+  <h2>2. 子孫要素を含む</h2>
+  <div class="card p-6 bg-white rounded-lg">
+    <h2 class="text-xl font-bold mb-2">Title</h2>
+    <p class="text-sm text-gray-600">Description</p>
+  </div>
+
+  <h2>3. 手入力</h2>
+  <p>パネルに <code>.p-4 .bold</code> を入力して解析</p>
+</body>
+</html>

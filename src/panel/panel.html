@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Component CSS Extractor</title>
+  <link rel="stylesheet" href="panel.css">
+</head>
+<body>
+  <main>
+    <header><h1>Component CSS Extractor</h1><p>選択した要素のクラス由来CSSをまとめます。</p></header>
+    <section aria-labelledby="target-heading">
+      <h2 id="target-heading">対象</h2>
+      <div class="choice-row">
+        <label><input type="radio" name="mode" value="selected" checked> Elementsで選択</label>
+        <label><input type="radio" name="mode" value="manual"> クラスを入力</label>
+      </div>
+      <p id="selection" class="selection">Elementsパネルで要素を選択してください。</p>
+      <label id="manual-wrap" class="field hidden">クラス名（空白・改行区切り）
+        <textarea id="manual-classes" rows="3" placeholder="p-4 bold または .p-4 .bold"></textarea>
+      </label>
+    </section>
+    <section aria-labelledby="settings-heading">
+      <h2 id="settings-heading">設定</h2>
+      <fieldset id="scope-fieldset"><legend>範囲</legend>
+        <label><input type="radio" name="scope" value="single" checked> 選択要素のみ</label>
+        <label><input type="radio" name="scope" value="descendants"> 子孫要素を含む</label>
+      </fieldset>
+      <label class="field">ルートのクラス名<input id="root-class" type="text" value="component" spellcheck="false" aria-describedby="root-help"></label>
+      <small id="root-help">例: card（出力は .card）</small>
+      <label class="field">セレクタ方式
+        <select id="strategy">
+          <option value="meaningful">既存の意味あるクラスを優先</option>
+          <option value="generated">コンポーネントクラスを生成</option>
+          <option value="dom">DOMセレクタを使用</option>
+        </select>
+      </label>
+      <fieldset class="options"><legend>含めるCSS</legend>
+        <label><input type="checkbox" id="media" checked> @media</label>
+        <label><input type="checkbox" id="pseudo-classes" checked> 疑似クラス</label>
+        <label><input type="checkbox" id="pseudo-elements" checked> 疑似要素</label>
+        <label><input type="checkbox" id="supports" checked> @supports</label>
+        <label><input type="checkbox" id="container" checked> @container</label>
+        <label><input type="checkbox" id="layer" checked> @layer</label>
+        <label><input type="checkbox" id="custom-properties" checked> CSS変数の宣言</label>
+      </fieldset>
+      <button id="analyze" type="button" class="primary">解析する</button>
+      <p id="status" role="status" aria-live="polite"></p>
+    </section>
+    <section aria-labelledby="result-heading">
+      <h2 id="result-heading">結果</h2>
+      <div id="warnings" class="warnings" role="alert"></div>
+      <div class="result-heading"><h3>CSS</h3><button id="copy-css" type="button" disabled>CSSをコピー</button></div>
+      <pre><code id="css-output"></code></pre>
+      <div class="result-heading"><h3>HTML</h3><button id="copy-html" type="button" disabled>HTMLをコピー</button></div>
+      <pre><code id="html-output"></code></pre>
+      <button id="copy-both" type="button" disabled>両方コピー</button>
+    </section>
+  </main>
+  <script src="panel.js"></script>
+</body>
+</html>
