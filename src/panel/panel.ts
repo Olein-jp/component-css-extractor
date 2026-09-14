@@ -1,5 +1,5 @@
-import { generateOutput, type GenerateOptions, type Strategy } from '../css/generate-css';
-import { normalizeClasses, selectorClasses } from '../css/selectors';
+import { generateOutput, htmlReplacements, type GenerateOptions, type Strategy } from '../css/generate-css';
+import { normalizeClasses } from '../css/selectors';
 import { inspect, readSelection, renderHtml } from './chrome';
 import type { AnalyzeOptions } from '../model/types';
 
@@ -93,10 +93,7 @@ async function analyze(): Promise<void> {
     const result = generateOutput(snapshot, options.generate);
     if (options.analyze.mode === 'selected' && options.generate.strategy !== 'dom') {
       try {
-        const replacements = result.nodes.filter((node) => node.outputClass && (node.id === '0' || snapshot.rules.some((rule) => rule.nodeId === node.id)))
-          .map((node) => ({ id: node.id, outputClass: node.outputClass,
-            removeClasses: [...new Set(snapshot.rules.filter((rule) => rule.nodeId === node.id).flatMap((rule) => selectorClasses(rule.originalSelector)))] }));
-        result.html = await renderHtml(replacements, options.analyze.mode);
+        result.html = await renderHtml(htmlReplacements(snapshot, result.nodes), options.analyze.mode);
       }
       catch { result.warnings.push('変更後HTMLを生成できませんでした。'); }
     }
@@ -107,7 +104,8 @@ async function analyze(): Promise<void> {
     copyCss.disabled = !result.css;
     copyHtml.disabled = !result.html;
     copyBoth.disabled = !result.css && !result.html;
-    status.textContent = result.css ? `${result.nodes.length} 要素を解析しました。` : '一致するCSSがありません。';
+    const recovered = snapshot.recoveredStylesheets ? ` 外部CSS ${snapshot.recoveredStylesheets} 件を補完しました。` : '';
+    status.textContent = result.css ? `${result.nodes.length} 要素を解析しました。${recovered}` : '一致するCSSがありません。';
   } catch (error) {
     if (version === requestVersion) {
       status.textContent = error instanceof Error ? error.message : '解析に失敗しました。';

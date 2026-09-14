@@ -1,6 +1,8 @@
 import type { AnalyzeOptions, PageSnapshot } from '../model/types';
 
 let inspectorScript: Promise<string> | undefined;
+const MAX_STYLESHEET_LENGTH = 8_000_000;
+const MAX_TOTAL_LENGTH = 16_000_000;
 
 async function script(): Promise<string> {
   inspectorScript ??= fetch(chrome.runtime.getURL('inspect-page.js')).then(async (response) => {
@@ -28,7 +30,65 @@ export async function readSelection(): Promise<{ tagName: string; classes: strin
 
 export async function inspect(options: AnalyzeOptions): Promise<PageSnapshot> {
   const source = await script();
-  return evaluate<PageSnapshot>(`((selected) => { ${source}\n return __componentCssInspector.inspectPage(${JSON.stringify(options)}, selected); })(typeof $0 === 'undefined' ? null : $0)`);
+  const evaluateSnapshot = (fallback: Record<string, string>): Promise<PageSnapshot> => evaluate<PageSnapshot>(
+    `((selected) => { ${source}\n return __componentCssInspector.inspectPage(${JSON.stringify(options)}, selected, ${JSON.stringify(fallback)}); })(typeof $0 === 'undefined' ? null : $0)`
+  );
+  const initial = await evaluateSnapshot({});
+  const urls = [...new Set(initial.unreadableStylesheets ?? [])];
+  if (!urls.length) return initial;
+  try {
+    const { stylesheets, warnings } = await readStyleResources(urls);
+    if (!Object.keys(stylesheets).length) return { ...initial, warnings: [...initial.warnings, ...warnings] };
+    const recovered = await evaluateSnapshot(stylesheets);
+    return { ...recovered, warnings: [...recovered.warnings, ...warnings] };
+  } catch {
+    return { ...initial, warnings: [...initial.warnings, 'DevToolsから外部CSSを再取得できませんでした。'] };
+  }
+}
+
+interface ResourceContent { content: string; encoding: string }
+
+function decodeResource(content: string, encoding: string): string {
+  if (!encoding) return content;
+  if (encoding !== 'base64') throw new Error('未対応のCSSエンコード形式です。');
+  const binary = atob(content);
+  return new TextDecoder().decode(Uint8Array.from(binary, (char) => char.charCodeAt(0)));
+}
+
+async function resourceContent(resource: chrome.devtools.inspectedWindow.Resource): Promise<string> {
+  return new Promise((resolve, reject) => {
+    resource.getContent((response: string | ResourceContent, encoding: string) => {
+      const value = typeof response === 'string' ? response : response?.content;
+      const format = typeof response === 'string' ? encoding : response?.encoding;
+      if (typeof value !== 'string') { reject(new Error('CSS本文を取得できませんでした。')); return; }
+      try { resolve(decodeResource(value, format ?? '')); }
+      catch (error) { reject(error); }
+    });
+  });
+}
+
+export async function readStyleResources(urls: string[]): Promise<{ stylesheets: Record<string, string>; warnings: string[] }> {
+  const resources = await new Promise<chrome.devtools.inspectedWindow.Resource[]>((resolve) => {
+    chrome.devtools.inspectedWindow.getResources((items) => resolve(items ?? []));
+  });
+  const byUrl = new Map(resources.map((resource) => [resource.url, resource]));
+  const stylesheets: Record<string, string> = {};
+  const warnings = new Set<string>();
+  let totalLength = 0;
+  for (const url of urls) {
+    const resource = byUrl.get(url);
+    if (!resource) continue;
+    try {
+      const content = await resourceContent(resource);
+      if (content.length > MAX_STYLESHEET_LENGTH || totalLength + content.length > MAX_TOTAL_LENGTH) {
+        warnings.add('容量上限を超えた外部CSSは補完できませんでした。');
+        continue;
+      }
+      stylesheets[url] = content;
+      totalLength += content.length;
+    } catch { warnings.add('一部の外部CSS本文を取得できませんでした。'); }
+  }
+  return { stylesheets, warnings: [...warnings] };
 }
 
 export async function renderHtml(nodes: Array<{ id: string; outputClass: string | null; removeClasses: string[] }>, mode: 'selected' | 'manual'): Promise<string> {

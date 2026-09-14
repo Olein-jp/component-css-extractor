@@ -28,6 +28,7 @@ export interface SourceRule {
   contexts: RuleContext[];
   declarations: Declaration[];
   sourceOrder: number;
+  preserveSelector?: boolean;
 }
 
 export interface PageSnapshot {
@@ -36,6 +37,8 @@ export interface PageSnapshot {
   warnings: string[];
   selectedLabel: string;
   originalHtml: string;
+  unreadableStylesheets?: string[];
+  recoveredStylesheets?: number;
 }
 
 export interface AnalyzeOptions {

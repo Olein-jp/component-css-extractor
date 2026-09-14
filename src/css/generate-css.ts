@@ -79,6 +79,10 @@ function renderSegment(segment: Segment): string {
 
 function ruleAllowed(rule: SourceRule, options: GenerateOptions): boolean {
   if (!rule.contexts.every((context) => contextAllowed(context, options))) return false;
+  if (rule.preserveSelector) {
+    if (!options.includePseudoElements && /(?<!\\)::[a-z-]+/i.test(rule.originalSelector)) return false;
+    if (!options.includePseudoClasses && /(?<![\\:]):[a-z-]+/i.test(rule.originalSelector)) return false;
+  }
   if (rule.suffix.includes('::') && !options.includePseudoElements) return false;
   if (rule.suffix.replace(/::[a-z-]+/g, '').includes(':') && !options.includePseudoClasses) return false;
   return true;
@@ -96,7 +100,7 @@ export function generateOutput(snapshot: PageSnapshot, options: GenerateOptions)
       .sort((a, b) => a.sourceOrder - b.sourceOrder);
     const segments: Segment[] = [];
     for (const rule of rules) {
-      const selector = node.outputSelector + rule.suffix;
+      const selector = rule.preserveSelector ? rule.originalSelector : node.outputSelector + rule.suffix;
       const key = JSON.stringify([selector, rule.contexts]);
       const previous = segments.at(-1);
       const previousKey = previous ? JSON.stringify([previous.selector, previous.contexts]) : '';
@@ -117,4 +121,14 @@ export function generateOutput(snapshot: PageSnapshot, options: GenerateOptions)
   }
   if (!blocks.length) warnings.push('一致するCSSルールが見つかりませんでした。');
   return { css: blocks.join('\n\n'), html: snapshot.originalHtml, warnings, nodes };
+}
+
+export function htmlReplacements(snapshot: PageSnapshot, nodes: OutputNode[]): Array<{ id: string; outputClass: string; removeClasses: string[] }> {
+  const retainedClasses = new Set(snapshot.rules.filter((rule) => rule.preserveSelector)
+    .flatMap((rule) => selectorClasses(rule.originalSelector)));
+  return nodes.filter((node): node is OutputNode & { outputClass: string } => Boolean(node.outputClass)
+    && (node.id === '0' || snapshot.rules.some((rule) => rule.nodeId === node.id)))
+    .map((node) => ({ id: node.id, outputClass: node.outputClass,
+      removeClasses: [...new Set(snapshot.rules.filter((rule) => rule.nodeId === node.id)
+        .flatMap((rule) => selectorClasses(rule.originalSelector)))].filter((name) => !retainedClasses.has(name)) }));
 }

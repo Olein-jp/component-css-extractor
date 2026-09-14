@@ -3,7 +3,7 @@
 ## 技術レビューと判断
 
 - DevTools の `$0` は `chrome.devtools.inspectedWindow.eval()` から参照できる。ページ由来の値は JSON 化してパネルに渡し、画面には `textContent` で表示する。
-- `document.styleSheets` の `cssRules` は別オリジンの CSS で例外になる。失敗したシートを記録して残りを処理する。Resource API からの再取得は MVP 後に扱う。
+- `document.styleSheets` の `cssRules` は別オリジンの CSS で例外になる。失敗したシートを記録して残りを処理し、DevTools Resource API で本文を取得できた場合は CSSOM へ戻して補完する。
 - CSSOM のグループルールを再帰走査し、出現順と `!important` を保持する。完全な Cascade 再現は行わず、判定できない競合は警告する。
 - 権限は `devtools_page` のみを基本とする。ホスト権限、`tabs`、`scripting` は要求しない。
 - ランタイム依存を増やさず、esbuild で TypeScript をビルドし、Vitest で純粋ロジックを検証する。

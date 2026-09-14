@@ -1,0 +1,9 @@
+.external-pad {
+  padding: 1rem;
+}
+
+@media (min-width: 700px) {
+  .external-pad {
+    padding: 2rem;
+  }
+}

@@ -81,6 +81,31 @@ export function stripSupportedSuffix(selector: string): { base: string; suffix: 
   return { base, suffix };
 }
 
+export function selectorForStateMatching(selector: string): string {
+  // Remove only top-level dynamic states for matching; the original selector is kept in output.
+  let result = '';
+  let depth = 0;
+  let bracketDepth = 0;
+  let quote = '';
+  for (let i = 0; i < selector.length; i++) {
+    const char = selector[i];
+    if (char === '\\') { result += selector.slice(i, i + 2); i++; continue; }
+    if (quote) { result += char; if (char === quote) quote = ''; continue; }
+    if (char === '"' || char === "'") { quote = char; result += char; continue; }
+    if (char === '[') bracketDepth++;
+    if (char === ']') bracketDepth--;
+    if (char === '(') depth++;
+    if (char === ')') depth--;
+    if (char === ':' && depth === 0 && bracketDepth === 0 && selector[i + 1] !== ':') {
+      const state = supportedStates.find((name) => selector.slice(i + 1).startsWith(name)
+        && !/[-_a-zA-Z0-9]/.test(selector[i + name.length + 1] ?? ''));
+      if (state) { i += state.length; continue; }
+    }
+    result += char;
+  }
+  return result.replace(/(?<!\\)::(before|after|marker|placeholder)$/i, '');
+}
+
 export function isSimpleCompound(selector: string): boolean {
   // Structural and functional selectors are deferred: rewriting them can change their meaning.
   for (let i = 0; i < selector.length; i++) {

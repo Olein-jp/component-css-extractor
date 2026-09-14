@@ -21,13 +21,15 @@ Chrome で `chrome://extensions` を開き、デベロッパーモードを有�
 
 手動確認には [tests/manual-fixture.html](tests/manual-fixture.html) を利用できます。リポジトリで `python3 -m http.server 8000` を実行し、Chrome で `http://localhost:8000/tests/manual-fixture.html` を開いてください。
 
+外部 CSS の補完と複雑なセレクタの確認には、別のターミナルでも `python3 -m http.server 8001` を実行し、`http://localhost:8000/tests/cross-origin-fixture.html` を開きます。「この要素を選択して解析」の要素を選び、ルートのクラス名を `component-test` にして解析してください。外部 CSS 由来の `padding` と `@media` が `.component-test` に入り、`.wrapper > .sample[data-state="ready"]` は元の形で出力されます。
+
 ルートのクラス名は出力用です。たとえば `card` と入力すると `.card` が生成されます。「既存の意味あるクラスを優先」では、子要素に CSS 抽出対象として使われなかったクラスがあれば、その名前を優先します。「コンポーネントクラスを生成」では `.card__title` などを作ります。「DOMセレクタを使用」では子要素に `.card > h2:nth-child(1)` のようなセレクタを使い、HTML は元のまま表示します。
 
 ## 仕様と制限
 
-- CSSOM の `document.styleSheets` と `@import` を再帰的に読みます。別オリジンなどで読めないシートはスキップして件数を警告します。DevTools Resource API による再取得は未実装です。
+- CSSOM の `document.styleSheets` と `@import` を再帰的に読みます。別オリジンなどで読めないシートは DevTools Resource API から本文を再取得して補完します。リソースが取得できない場合や容量上限を超える場合は、残件数を警告します。補完した CSS 内の `@import` は構築した CSSStyleSheet で読み込めないため、別途確認が必要です。
 - 元 CSS にある `@media`、`@supports`、`@container`、`@layer`、一部の疑似クラス・疑似要素、CSS カスタムプロパティ、`!important` を保持します。メディアクエリは現在の表示幅に関係なく収集します。
-- 安全に書き換えられる単純なクラス複合セレクタ（例: `.foo`、`.foo.bar`、`.md\\:p-8:hover`）を対象とします。祖先・兄弟条件、属性セレクタ、`:is()`・`:not()` などの関数型セレクタ、CSS Nesting、`@scope` は省略し、警告します。
+- 単純なクラス複合セレクタ（例: `.foo`、`.foo.bar`、`.md\\:p-8:hover`）はコンポーネント用セレクタへ統合します。祖先・兄弟条件、属性セレクタ、`:is()`・`:not()` などの複雑なセレクタは、選択要素との一致を確認できた場合に元の形で出力し、必要な元クラスも HTML に残します。手入力モードや一致を確認できない状態依存のルールは省略される場合があります。
 - 完全な CSS Cascade は再現しません。同一文脈内では `!important`、単純セレクタの詳細度、元の出現順で競合を解決します。レイヤー間の順序、`:where()`、継承、インラインスタイル、アニメーションは評価しません。抽出結果を必ず確認してください。
 - 生成 HTML は選択要素を複製して作り、抽出に利用したクラスを置き換えます。解析されなかったクラスや他の属性・テキストは保持します。JavaScript が参照するクラスを CSS 抽出にも利用している場合、コピー前に HTML を確認してください。
 - 250 を超える子孫要素は先頭 250 件まで解析します。Shadow DOM と adoptedStyleSheets は対象外です。手入力モードでは実 DOM の状態を確認できないため、単純セレクタのクラス一致で抽出します。
@@ -42,14 +44,14 @@ npm run build
 
 ## GitHub Releases 向けパッケージ
 
-`npm run package:release` で `release/component-css-extractor-v0.1.0.zip` と SHA-256 チェックサムを生成します。ZIP 内の最上位フォルダを展開して、そのフォルダを Chrome の「パッケージ化されていない拡張機能を読み込む」で指定します。ZIP をそのまま Chrome に渡してインストールする方式ではありません。
+`npm run package:release` で現在のバージョンの ZIP（例: `release/component-css-extractor-v0.1.1.zip`）と SHA-256 チェックサムを生成します。ZIP 内の最上位フォルダを展開して、そのフォルダを Chrome の「パッケージ化されていない拡張機能を読み込む」で指定します。ZIP をそのまま Chrome に渡してインストールする方式ではありません。
 
-`package.json` と `manifest.json` のバージョンを揃えたうえで、そのバージョンのタグ（例: `v0.1.0`）を、ワークフローを含むコミットに付けてプッシュすると、GitHub Actions が型チェック・テスト・ZIP 検証を実行し、ZIP とチェックサムを GitHub Release に添付します。テストまたはバージョン照合が失敗した場合は Release を作成しません。タグはブランチのコミットをプッシュした後に付けてください。
+`package.json` と `manifest.json` のバージョンを揃えたうえで、そのバージョンのタグ（例: `v0.1.1`）を、ワークフローを含むコミットに付けてプッシュすると、GitHub Actions が型チェック・テスト・ZIP 検証を実行し、ZIP とチェックサムを GitHub Release に添付します。テストまたはバージョン照合が失敗した場合は Release を作成しません。タグはブランチのコミットをプッシュした後に付けてください。
 
 ```sh
 git push origin main
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 GitHub Actions では自動発行される `GITHUB_TOKEN` を使うため、追加のトークンをリポジトリに登録する必要はありません。ローカルからのプッシュには、通常どおり GitHub の認証が必要です。

@@ -1,4 +1,4 @@
-import { isSimpleCompound, selectorClasses, simpleSpecificity, splitSelectorList, stripSupportedSuffix } from '../css/selectors';
+import { isSimpleCompound, selectorClasses, selectorForStateMatching, simpleSpecificity, splitSelectorList, stripSupportedSuffix } from '../css/selectors';
 import type { AnalyzeOptions, Declaration, ElementNode, PageSnapshot, RuleContext, SourceRule } from '../model/types';
 
 function serializeNode(element: Element, id: string, parentId: string | null): ElementNode {
@@ -35,7 +35,7 @@ function hasNestedRules(rule: CSSRule): rule is CSSRule & { cssRules: CSSRuleLis
   return 'cssRules' in rule && typeof (rule as CSSRule & { cssRules?: unknown }).cssRules === 'object';
 }
 
-export function inspectPage(options: AnalyzeOptions, selected: Element | null): PageSnapshot {
+export function inspectPage(options: AnalyzeOptions, selected: Element | null, fallbackStylesheets: Record<string, string> = {}): PageSnapshot {
   const warnings: string[] = [];
   if (options.mode === 'selected' && selected?.nodeType !== 1) {
     return { nodes: [], rules: [], warnings, selectedLabel: '', originalHtml: '' };
@@ -54,6 +54,9 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null): 
   const rules: SourceRule[] = [];
   let sourceOrder = 0;
   let skippedSelectors = 0;
+  let preservedSelectors = 0;
+  let recoveredStylesheets = 0;
+  const unreadableStylesheets: string[] = [];
   const visitedSheets = new Set<CSSStyleSheet>();
   function traverse(list: CSSRuleList, contexts: RuleContext[]): void {
     for (const rule of Array.from(list)) {
@@ -70,7 +73,24 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null): 
           const selectorNames = selectorClasses(selector);
           if (!selectorNames.some((name) => classNodes.has(name))) continue;
           const parts = stripSupportedSuffix(selector);
-          if (!parts || !isSimpleCompound(parts.base)) { skippedSelectors++; continue; }
+          if (!parts || !isSimpleCompound(parts.base)) {
+            if (options.mode === 'manual') { skippedSelectors++; continue; }
+            let matched = false;
+            const matchSelector = selectorForStateMatching(selector);
+            for (const node of nodes) {
+              const element = elements.get(node.id);
+              if (!element) continue;
+              try {
+                if (element.matches(matchSelector)) {
+                  rules.push({ nodeId: node.id, originalSelector: selector, suffix: '', specificity: 0,
+                    contexts, declarations, sourceOrder: order, preserveSelector: true });
+                  matched = true;
+                }
+              } catch { skippedSelectors++; }
+            }
+            if (matched) preservedSelectors++;
+            continue;
+          }
           const names = selectorClasses(parts.base);
           if (!names.length) continue;
           const candidates = new Set<string>();
@@ -102,8 +122,35 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null): 
   function visitSheet(sheet: CSSStyleSheet, contexts: RuleContext[]): void {
     if (visitedSheets.has(sheet) || sheet.disabled) return;
     visitedSheets.add(sheet);
+    const ruleCount = rules.length;
+    const order = sourceOrder;
+    const skipped = skippedSelectors;
+    const preserved = preservedSelectors;
     try { traverse(sheet.cssRules, contexts); }
-    catch { inaccessible++; }
+    catch {
+      rules.length = ruleCount;
+      sourceOrder = order;
+      skippedSelectors = skipped;
+      preservedSelectors = preserved;
+      const href = sheet.href;
+      const cssText = href ? fallbackStylesheets[href] : undefined;
+      if (cssText) {
+        try {
+          const parsed = new CSSStyleSheet();
+          parsed.replaceSync(cssText);
+          if (cssText.trim() && !parsed.cssRules.length) throw new Error('No CSS rules parsed');
+          traverse(parsed.cssRules, contexts);
+          recoveredStylesheets++;
+          if (/@import\b/i.test(cssText)) warnings.push('補完したCSSの @import は読み込めない場合があります。');
+          return;
+        } catch {
+          rules.length = ruleCount;
+          sourceOrder = order;
+        }
+      }
+      inaccessible++;
+      if (href) unreadableStylesheets.push(href);
+    }
   }
   const ownerDocument = options.mode === 'selected' ? (selected as Element).ownerDocument : document;
   for (const sheet of Array.from(ownerDocument.styleSheets)) {
@@ -113,9 +160,11 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null): 
     visitSheet(sheet, contexts);
   }
   if (inaccessible) warnings.push(`${inaccessible} 件のスタイルシートを解析できませんでした（別オリジンまたは読み取りエラー）。`);
-  if (skippedSelectors) warnings.push(`${skippedSelectors} 件の複雑なセレクタを安全に変換できないため省略しました。`);
+  if (preservedSelectors) warnings.push(`${preservedSelectors} 件の複雑なセレクタを元の形で出力しました。コンポーネントクラスへの統合対象外です。`);
+  if (skippedSelectors) warnings.push(`${skippedSelectors} 件のセレクタは解析できず省略しました。`);
   const selectedLabel = nodes[0] ? `<${nodes[0].tagName} class="${nodes[0].classes.join(' ')}">` : '';
-  return { nodes, rules, warnings, selectedLabel, originalHtml: options.mode === 'selected' ? (selected as Element).outerHTML.slice(0, 100_000) : '' };
+  return { nodes, rules, warnings, selectedLabel, originalHtml: options.mode === 'selected' ? (selected as Element).outerHTML.slice(0, 100_000) : '',
+    unreadableStylesheets, recoveredStylesheets };
 }
 
 export function renderHtml(classes: Array<{ id: string; outputClass: string | null; removeClasses: string[] }>, selected: Element | null): string {

@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { generateOutput, type GenerateOptions } from '../src/css/generate-css';
-import { escapeCssIdentifier, isSimpleCompound, normalizeClasses, selectorClasses, splitSelectorList, stripSupportedSuffix } from '../src/css/selectors';
+import { generateOutput, htmlReplacements, type GenerateOptions } from '../src/css/generate-css';
+import { escapeCssIdentifier, isSimpleCompound, normalizeClasses, selectorClasses, selectorForStateMatching, splitSelectorList, stripSupportedSuffix } from '../src/css/selectors';
 import { inspectPage } from '../src/inspector/inspect-page';
+import { inspect, readStyleResources } from '../src/panel/chrome';
 import type { Declaration, ElementNode, PageSnapshot, RuleContext, SourceRule } from '../src/model/types';
 
 const options: GenerateOptions = {
@@ -88,6 +89,7 @@ describe('セレクタ解析', () => {
     expect(selectorClasses('.\\32 xl\\:grid')).toEqual(['2xl:grid']);
     expect(isSimpleCompound('.\\32 xl\\:grid')).toBe(true);
     expect(escapeCssIdentifier('2xl:grid')).toBe('\\32 xl\\3a grid');
+    expect(selectorForStateMatching('.parent:hover .foo::before')).toBe('.parent .foo');
   });
 
   it('関数内のカンマではセレクタを分割しない', () => {
@@ -150,5 +152,107 @@ describe('CSSOM収集', () => {
     expect(result.rules).toHaveLength(2);
     expect(result.rules[1].contexts).toEqual([{ type: 'media', header: '@media (min-width: 768px)' }]);
     expect(result.warnings).toContain('1 件のスタイルシートを解析できませんでした（別オリジンまたは読み取りエラー）。');
+  });
+
+  it('読み取れないシートをCSS本文で補完し、元のシート順を保つ', () => {
+    class FakeStyleRule {
+      type = 1;
+      style: { length: number; item: () => string; getPropertyValue: () => string; getPropertyPriority: () => string };
+      constructor(public selectorText: string, value: string) {
+        this.style = { length: 1, item: () => 'color', getPropertyValue: () => value, getPropertyPriority: () => '' };
+      }
+    }
+    class FakeSheet {
+      cssRules: FakeStyleRule[] = [];
+      replaceSync(text: string): void { this.cssRules = [new FakeStyleRule('.foo', text.includes('blue') ? 'blue' : 'unknown')]; }
+    }
+    const url = 'https://cdn.example.test/site.css';
+    const sheets = [
+      { disabled: false, cssRules: [new FakeStyleRule('.foo', 'red')] },
+      { disabled: false, href: url, get cssRules(): never { throw new Error('SecurityError'); } },
+      { disabled: false, cssRules: [new FakeStyleRule('.foo', 'green')] },
+    ];
+    vi.stubGlobal('document', { styleSheets: sheets });
+    vi.stubGlobal('CSSStyleSheet', FakeSheet);
+    const page = inspectPage({ mode: 'manual', includeDescendants: false, manualClasses: ['foo'] }, null, { [url]: '.foo { color: blue; }' });
+    expect(page.rules.map((item) => item.declarations[0].value)).toEqual(['red', 'blue', 'green']);
+    expect(page.recoveredStylesheets).toBe(1);
+    expect(page.unreadableStylesheets).toEqual([]);
+    expect(page.warnings).toEqual([]);
+  });
+
+  it('一致する複雑なセレクタを元の形で保ち、HTMLに必要なクラスを残す', () => {
+    class FakeStyleRule {
+      type = 1;
+      style = { length: 1, item: () => 'color', getPropertyValue: () => 'red', getPropertyPriority: () => '' };
+      constructor(public selectorText: string) {}
+    }
+    const rules = [new FakeStyleRule('.parent:hover .foo'), new FakeStyleRule('.foo:not(.disabled)')];
+    const ownerDocument = { styleSheets: [{ disabled: false, cssRules: rules }] };
+    const selected = { nodeType: 1, tagName: 'DIV', classList: ['foo'], attributes: [], children: [], ownerDocument, outerHTML: '<div class="foo"></div>',
+      matches: (selector: string) => selector === '.parent .foo' || selector === '.foo:not(.disabled)' } as unknown as Element;
+    const page = inspectPage({ mode: 'selected', includeDescendants: false, manualClasses: [] }, selected);
+    expect(page.rules).toHaveLength(2);
+    expect(page.rules.every((item) => item.preserveSelector)).toBe(true);
+    const output = generateOutput(page, options);
+    expect(output.css).toContain('.parent:hover .foo {');
+    expect(output.css).toContain('.foo:not(.disabled) {');
+    expect(htmlReplacements(page, output.nodes)).toEqual([{ id: '0', outputClass: 'card', removeClasses: [] }]);
+  });
+
+  it('親クラスだけを参照するルールも子孫ノードのCSSとして保持する', () => {
+    class FakeStyleRule {
+      type = 1;
+      selectorText = '.foo > span';
+      style = { length: 1, item: () => 'color', getPropertyValue: () => 'red', getPropertyPriority: () => '' };
+    }
+    const ownerDocument = { styleSheets: [{ disabled: false, cssRules: [new FakeStyleRule()] }] };
+    const child = { nodeType: 1, tagName: 'SPAN', classList: [], attributes: [], children: [], ownerDocument,
+      matches: (selector: string) => selector === '.foo > span' } as unknown as Element;
+    const selected = { nodeType: 1, tagName: 'DIV', classList: ['foo'], attributes: [], children: [child], ownerDocument,
+      outerHTML: '<div class="foo"><span></span></div>', matches: () => false } as unknown as Element;
+    const page = inspectPage({ mode: 'selected', includeDescendants: true, manualClasses: [] }, selected);
+    expect(page.rules).toHaveLength(1);
+    expect(page.rules[0].nodeId).toBe('0.0');
+    expect(page.rules[0].preserveSelector).toBe(true);
+  });
+});
+
+describe('DevTools Resource API', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('CSS本文とbase64本文を取得して復号する', async () => {
+    const urls = ['https://example.test/plain.css', 'https://example.test/encoded.css', 'https://example.test/object.css'];
+    vi.stubGlobal('chrome', { devtools: { inspectedWindow: { getResources: (callback: (resources: unknown[]) => void) => callback([
+      { url: urls[0], getContent: (done: (content: string, encoding: string) => void) => done('.foo { color: red; }', '') },
+      { url: urls[1], getContent: (done: (content: string, encoding: string) => void) => done(btoa('.bar { color: blue; }'), 'base64') },
+      { url: urls[2], getContent: (done: (response: { content: string; encoding: string }) => void) => done({ content: '.baz { color: green; }', encoding: '' }) },
+    ]) } } });
+    const result = await readStyleResources(urls);
+    expect(result.stylesheets[urls[0]]).toBe('.foo { color: red; }');
+    expect(result.stylesheets[urls[1]]).toBe('.bar { color: blue; }');
+    expect(result.stylesheets[urls[2]]).toBe('.baz { color: green; }');
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('読み取れないURLがある場合だけ再取得して再解析する', async () => {
+    const url = 'https://cdn.example.test/site.css';
+    const first: PageSnapshot = { nodes: [node('0', ['foo'])], rules: [], warnings: ['1 件のスタイルシートを解析できませんでした（別オリジンまたは読み取りエラー）。'],
+      selectedLabel: '', originalHtml: '', unreadableStylesheets: [url], recoveredStylesheets: 0 };
+    const second: PageSnapshot = { ...first, warnings: [], unreadableStylesheets: [], recoveredStylesheets: 1 };
+    const expressions: string[] = [];
+    vi.stubGlobal('fetch', async () => ({ ok: true, text: async () => 'var __componentCssInspector = {};' }));
+    vi.stubGlobal('chrome', { runtime: { getURL: () => 'chrome-extension://test/inspect-page.js' }, devtools: { inspectedWindow: {
+      eval: (expression: string, callback: (value: PageSnapshot, error: null) => void) => {
+        expressions.push(expression);
+        callback(expressions.length === 1 ? first : second, null);
+      },
+      getResources: (callback: (resources: unknown[]) => void) => callback([{ url, getContent: (done: (content: string, encoding: string) => void) => done('.foo { color: blue; }', '') }]),
+    } } });
+    const result = await inspect({ mode: 'manual', includeDescendants: false, manualClasses: ['foo'] });
+    expect(expressions).toHaveLength(2);
+    expect(expressions[1]).toContain('.foo { color: blue; }');
+    expect(result.recoveredStylesheets).toBe(1);
+    expect(result.warnings).toEqual([]);
   });
 });
