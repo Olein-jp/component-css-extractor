@@ -54,7 +54,6 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
   const rules: SourceRule[] = [];
   let sourceOrder = 0;
   let skippedSelectors = 0;
-  let preservedSelectors = 0;
   let recoveredStylesheets = 0;
   const unreadableStylesheets: string[] = [];
   const visitedSheets = new Set<CSSStyleSheet>();
@@ -88,7 +87,6 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
           const parts = stripSupportedSuffix(selector);
           if (!parts || !isSimpleCompound(parts.base)) {
             if (options.mode === 'manual') { skippedSelectors++; continue; }
-            let matched = false;
             const matchSelector = selectorForStateMatching(selector);
             for (const node of nodes) {
               const element = elements.get(node.id);
@@ -98,11 +96,9 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
                   rules.push({ nodeId: node.id, originalSelector: selector, suffix: '', specificity: 0,
                     contexts, declarations, sourceOrder: order, preserveSelector: true,
                     externalDependency: needsOuterContext(node.id, matchSelector) });
-                  matched = true;
                 }
               } catch { skippedSelectors++; }
             }
-            if (matched) preservedSelectors++;
             continue;
           }
           const names = selectorClasses(parts.base);
@@ -139,13 +135,11 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
     const ruleCount = rules.length;
     const order = sourceOrder;
     const skipped = skippedSelectors;
-    const preserved = preservedSelectors;
     try { traverse(sheet.cssRules, contexts); }
     catch {
       rules.length = ruleCount;
       sourceOrder = order;
       skippedSelectors = skipped;
-      preservedSelectors = preserved;
       const href = sheet.href;
       const cssText = href ? fallbackStylesheets[href] : undefined;
       if (cssText) {
@@ -174,7 +168,6 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
     visitSheet(sheet, contexts);
   }
   if (inaccessible) warnings.push(`${inaccessible} 件のスタイルシートを解析できませんでした（別オリジンまたは読み取りエラー）。`);
-  if (preservedSelectors) warnings.push(`${preservedSelectors} 件の複雑なセレクタを検出しました。安全に変換できないものは元の形で出力します。`);
   if (skippedSelectors) warnings.push(`${skippedSelectors} 件のセレクタは解析できず省略しました。`);
   const selectedLabel = nodes[0] ? `<${nodes[0].tagName} class="${nodes[0].classes.join(' ')}">` : '';
   return { nodes, rules, warnings, selectedLabel, originalHtml: options.mode === 'selected' ? (selected as Element).outerHTML.slice(0, 100_000) : '',

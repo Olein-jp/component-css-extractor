@@ -163,6 +163,7 @@ describe('CSSOM収集', () => {
     const output = generateOutput(page, { ...options, rootClass: 'component-test' });
     expect(output.css).toContain('.component-test[data-state="ready"] {');
     expect(output.css).not.toContain('.wrapper');
+    expect(output.warnings).toEqual([]);
   });
 
   it('選択要素と子孫を別ノードとして収集し、受け入れ例のCSSを生成する', () => {
