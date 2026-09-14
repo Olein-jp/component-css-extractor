@@ -20,6 +20,12 @@
     .text-gray-600 { color: #4b5563; }
     .p-4 { padding: 1rem; }
     .bold { font-weight: 700; }
+    .section-title { letter-spacing: 0.02em; }
+    .external-pad { padding: 1rem; }
+    @media (min-width: 700px) {
+      .external-pad { padding: 2rem; }
+    }
+    .wrapper > .sample[data-state="ready"] { color: #1765cc; }
   </style>
 </head>
 <body>
@@ -36,5 +42,12 @@
 
   <h2>3. 手入力</h2>
   <p>パネルに <code>.p-4 .bold</code> を入力して解析</p>
+
+  <h2 class="section-title">4. 複雑なセレクタとメディアクエリ</h2>
+  <p>次の要素を選択し、ルートのクラス名を <code>component-test</code> にして解析してください。</p>
+  <div class="wrapper">
+    <div class="sample external-pad" data-state="ready">この要素を選択して解析</div>
+  </div>
+  <p>出力には <code>padding: 1rem</code>、<code>@media (min-width: 700px)</code> 内の <code>padding: 2rem</code>、<code>.component-test[data-state="ready"]</code> が含まれます。生成 HTML には <code>.wrapper</code> と <code>.sample</code> は不要です。</p>
 </body>
 </html>

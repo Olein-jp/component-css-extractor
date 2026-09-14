@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { generateOutput, htmlReplacements, type GenerateOptions } from '../src/css/generate-css';
 import { escapeCssIdentifier, isSimpleCompound, normalizeClasses, selectorClasses, selectorForStateMatching, splitSelectorList, stripSupportedSuffix } from '../src/css/selectors';
-import { inspectPage } from '../src/inspector/inspect-page';
+import { inspectPage, renderHtml } from '../src/inspector/inspect-page';
 import { inspect, readStyleResources } from '../src/panel/chrome';
 import type { Declaration, ElementNode, PageSnapshot, RuleContext, SourceRule } from '../src/model/types';
 
@@ -26,6 +26,51 @@ function snapshot(nodes: ElementNode[], rules: SourceRule[]): PageSnapshot {
 }
 
 describe('CSS生成', () => {
+  it('選択範囲外の単純な親条件をルートへ変換し、HTMLとCSSを単体で使えるようにする', () => {
+    const page = snapshot([node('0', ['sample', 'external-pad'])], [
+      rule('0', '.external-pad', 'padding', '1rem', 0),
+      rule('0', '.external-pad', 'padding', '2rem', 1, [{ type: 'media', header: '@media (min-width: 700px)' }]),
+      { ...rule('0', '.wrapper > .sample[data-state="ready"]', 'color', 'rgb(23, 101, 204)', 2),
+        preserveSelector: true, externalDependency: true },
+    ]);
+    const output = generateOutput(page, { ...options, rootClass: 'component-test' });
+    expect(output.css).toContain('.component-test[data-state="ready"] {\n  color: rgb(23, 101, 204);\n}');
+    expect(output.css).toContain('@media (min-width: 700px) {\n  .component-test {\n    padding: 2rem;\n  }\n}');
+    expect(output.css).not.toContain('.wrapper');
+    expect(output.warnings).toEqual([]);
+    const clone = {
+      classList: ['sample', 'external-pad'], children: { item: () => null },
+      setAttribute(_name: string, value: string) { this.classList = value.split(' '); },
+      get outerHTML() { return `<div class="${this.classList.join(' ')}" data-state="ready">この要素を選択して解析</div>`; },
+    };
+    const selected = { nodeType: 1, cloneNode: () => clone } as unknown as Element;
+    expect(renderHtml(htmlReplacements(page, output.nodes), selected))
+      .toBe('<div class="component-test" data-state="ready">この要素を選択して解析</div>');
+  });
+
+  it('安全に変換できない祖先状態は保持して具体的に警告する', () => {
+    const page = snapshot([node('0', ['sample'])], [
+      { ...rule('0', '.theme:hover .sample', 'color', 'red', 0), preserveSelector: true, externalDependency: true },
+    ]);
+    const output = generateOutput(page, { ...options, rootClass: 'component-test' });
+    expect(output.css).toContain('.theme:hover .sample {');
+    expect(output.css).not.toContain('.component-test {');
+    expect(output.warnings.join(' ')).toContain('.theme:hover .sample');
+    expect(output.warnings.join(' ')).toContain('コピーしたHTMLだけでは');
+    expect(htmlReplacements(page, output.nodes)[0].removeClasses).toEqual([]);
+  });
+
+  it('クラス属性を参照する条件は変換せず、元クラスと警告を保持する', () => {
+    const selector = '.wrapper > .sample[class~="sample"]';
+    const page = snapshot([node('0', ['sample'])], [
+      { ...rule('0', selector, 'color', 'red', 0), preserveSelector: true, externalDependency: true },
+    ]);
+    const output = generateOutput(page, { ...options, rootClass: 'component-test' });
+    expect(output.css).toContain(`${selector} {`);
+    expect(output.warnings.join(' ')).toContain(selector);
+    expect(htmlReplacements(page, output.nodes)[0].removeClasses).toEqual([]);
+  });
+
   it('複数のUtility classを1つのセレクタに統合する', () => {
     const result = generateOutput(snapshot([node('0', ['card', 'p-4', 'bold'])], [
       rule('0', '.p-4', 'padding', '1rem', 0), rule('0', '.bold', 'font-weight', '700', 1),
@@ -100,6 +145,25 @@ describe('セレクタ解析', () => {
 
 describe('CSSOM収集', () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it('実DOMでは一致するが選択範囲の複製では一致しない親条件を検出する', () => {
+    const selector = '.wrapper > .sample[data-state="ready"]';
+    const styleRule = { type: 1, selectorText: selector,
+      style: { length: 1, item: () => 'color', getPropertyValue: () => 'rgb(23, 101, 204)', getPropertyPriority: () => '' } };
+    const ownerDocument = { styleSheets: [{ disabled: false, cssRules: [styleRule] }] };
+    const selected = { nodeType: 1, tagName: 'DIV', classList: ['sample', 'external-pad'],
+      attributes: [{ name: 'class', value: 'sample external-pad' }, { name: 'data-state', value: 'ready' }],
+      children: [], ownerDocument, outerHTML: '<div class="sample external-pad" data-state="ready"></div>',
+      matches: (value: string) => value === selector,
+      cloneNode: () => ({ matches: () => false }),
+    } as unknown as Element;
+    const page = inspectPage({ mode: 'selected', includeDescendants: false, manualClasses: [] }, selected);
+    expect(page.rules).toHaveLength(1);
+    expect(page.rules[0].externalDependency).toBe(true);
+    const output = generateOutput(page, { ...options, rootClass: 'component-test' });
+    expect(output.css).toContain('.component-test[data-state="ready"] {');
+    expect(output.css).not.toContain('.wrapper');
+  });
 
   it('選択要素と子孫を別ノードとして収集し、受け入れ例のCSSを生成する', () => {
     class FakeStyleRule {
@@ -190,13 +254,16 @@ describe('CSSOM収集', () => {
     const rules = [new FakeStyleRule('.parent:hover .foo'), new FakeStyleRule('.foo:not(.disabled)')];
     const ownerDocument = { styleSheets: [{ disabled: false, cssRules: rules }] };
     const selected = { nodeType: 1, tagName: 'DIV', classList: ['foo'], attributes: [], children: [], ownerDocument, outerHTML: '<div class="foo"></div>',
-      matches: (selector: string) => selector === '.parent .foo' || selector === '.foo:not(.disabled)' } as unknown as Element;
+      matches: (selector: string) => selector === '.parent .foo' || selector === '.foo:not(.disabled)',
+      cloneNode: () => ({ matches: (selector: string) => selector === '.foo:not(.disabled)' }) } as unknown as Element;
     const page = inspectPage({ mode: 'selected', includeDescendants: false, manualClasses: [] }, selected);
     expect(page.rules).toHaveLength(2);
     expect(page.rules.every((item) => item.preserveSelector)).toBe(true);
+    expect(page.rules.map((item) => item.externalDependency)).toEqual([true, false]);
     const output = generateOutput(page, options);
     expect(output.css).toContain('.parent:hover .foo {');
     expect(output.css).toContain('.foo:not(.disabled) {');
+    expect(output.warnings.join(' ')).toContain('.parent:hover .foo');
     expect(htmlReplacements(page, output.nodes)).toEqual([{ id: '0', outputClass: 'card', removeClasses: [] }]);
   });
 

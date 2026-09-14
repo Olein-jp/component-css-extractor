@@ -58,6 +58,19 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
   let recoveredStylesheets = 0;
   const unreadableStylesheets: string[] = [];
   const visitedSheets = new Set<CSSStyleSheet>();
+  let detachedRoot: Element | null | undefined;
+  function needsOuterContext(nodeId: string, selector: string): boolean {
+    if (options.mode !== 'selected') return false;
+    if (detachedRoot === undefined) {
+      try { detachedRoot = (selected as Element).cloneNode(true) as Element; }
+      catch { detachedRoot = null; }
+    }
+    if (!detachedRoot) return false;
+    let copy: Element | null = detachedRoot;
+    for (const index of nodeId.split('.').slice(1).map(Number)) copy = copy?.children.item(index) ?? null;
+    try { return copy ? !copy.matches(selector) : false; }
+    catch { return false; }
+  }
   function traverse(list: CSSRuleList, contexts: RuleContext[]): void {
     for (const rule of Array.from(list)) {
       if (rule.type === 1 && 'selectorText' in rule && 'style' in rule) {
@@ -83,7 +96,8 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
               try {
                 if (element.matches(matchSelector)) {
                   rules.push({ nodeId: node.id, originalSelector: selector, suffix: '', specificity: 0,
-                    contexts, declarations, sourceOrder: order, preserveSelector: true });
+                    contexts, declarations, sourceOrder: order, preserveSelector: true,
+                    externalDependency: needsOuterContext(node.id, matchSelector) });
                   matched = true;
                 }
               } catch { skippedSelectors++; }
@@ -160,7 +174,7 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
     visitSheet(sheet, contexts);
   }
   if (inaccessible) warnings.push(`${inaccessible} 件のスタイルシートを解析できませんでした（別オリジンまたは読み取りエラー）。`);
-  if (preservedSelectors) warnings.push(`${preservedSelectors} 件の複雑なセレクタを元の形で出力しました。コンポーネントクラスへの統合対象外です。`);
+  if (preservedSelectors) warnings.push(`${preservedSelectors} 件の複雑なセレクタを検出しました。安全に変換できないものは元の形で出力します。`);
   if (skippedSelectors) warnings.push(`${skippedSelectors} 件のセレクタは解析できず省略しました。`);
   const selectedLabel = nodes[0] ? `<${nodes[0].tagName} class="${nodes[0].classes.join(' ')}">` : '';
   return { nodes, rules, warnings, selectedLabel, originalHtml: options.mode === 'selected' ? (selected as Element).outerHTML.slice(0, 100_000) : '',

@@ -29,6 +29,7 @@ export interface SourceRule {
   declarations: Declaration[];
   sourceOrder: number;
   preserveSelector?: boolean;
+  externalDependency?: boolean;
 }
 
 export interface PageSnapshot {
