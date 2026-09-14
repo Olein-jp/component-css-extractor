@@ -5,6 +5,7 @@ import { inspectPage, renderHtml } from '../src/inspector/inspect-page';
 import { inspect, readStyleResources } from '../src/panel/chrome';
 import { extractTopLevelImports } from '../src/css/imports';
 import { varReferences } from '../src/css/custom-properties';
+import { formatStylesheetDiagnostics, stylesheetLabel } from '../src/css/stylesheet-diagnostics';
 import type { Declaration, ElementNode, PageSnapshot, RuleContext, SourceRule } from '../src/model/types';
 
 describe('CSS import の抽出', () => {
@@ -296,7 +297,7 @@ describe('CSSOM収集', () => {
     const result = inspectPage({ mode: 'manual', includeDescendants: false, manualClasses: ['p-4', 'md:p-8'] }, null);
     expect(result.rules).toHaveLength(2);
     expect(result.rules[1].contexts).toEqual([{ type: 'media', header: '@media (min-width: 768px)' }]);
-    expect(result.warnings).toContain('1 件のスタイルシートを解析できませんでした（別オリジンまたは読み取りエラー）。');
+    expect(result.stylesheetDiagnostics).toEqual([{ reason: 'cssom-failed', label: 'URLのないスタイルシート' }]);
   });
 
   it('読み取れないシートをCSS本文で補完し、元のシート順を保つ', () => {
@@ -449,7 +450,7 @@ describe('DevTools Resource API', () => {
     expect(result.stylesheets[urls[0]]).toBe('.foo { color: red; }');
     expect(result.stylesheets[urls[1]]).toBe('.bar { color: blue; }');
     expect(result.stylesheets[urls[2]]).toBe('.baz { color: green; }');
-    expect(result.warnings).toEqual([]);
+    expect(result.diagnostics).toEqual([]);
   });
 
   it('import先を相対URLでたどり、循環時も同じリソースを一度だけ読む', async () => {
@@ -463,7 +464,7 @@ describe('DevTools Resource API', () => {
     const result = await readStyleResources([root]);
     expect(Object.keys(result.stylesheets)).toEqual([root, child]);
     expect(reads).toEqual([root, child]);
-    expect(result.warnings).toEqual([]);
+    expect(result.diagnostics).toEqual([]);
   });
 
   it('import先にも既存の容量上限を適用する', async () => {
@@ -475,12 +476,26 @@ describe('DevTools Resource API', () => {
     ]) } } });
     const result = await readStyleResources([root]);
     expect(Object.keys(result.stylesheets)).toEqual([root]);
-    expect(result.warnings).toContain('容量上限を超えた外部CSSは補完できませんでした。');
+    expect(result.diagnostics).toEqual([{ reason: 'size-limit', label: 'example.test/large.css' }]);
+  });
+
+  it('リソースなしと本文取得失敗を区別し、URLの機密部分を表示しない', async () => {
+    const missing = 'https://user:password@cdn.example.test/missing.css?token=secret#private';
+    const failed = 'https://cdn.example.test/failed.css?key=hidden';
+    vi.stubGlobal('chrome', { devtools: { inspectedWindow: { getResources: (callback: (resources: unknown[]) => void) => callback([
+      { url: failed, getContent: (done: (content: string | undefined, encoding: string) => void) => done(undefined, '') },
+    ]) } } });
+    const result = await readStyleResources([missing, failed]);
+    expect(result.diagnostics).toEqual([
+      { reason: 'resource-missing', label: 'cdn.example.test/missing.css' },
+      { reason: 'content-failed', label: 'cdn.example.test/failed.css' },
+    ]);
+    expect(JSON.stringify(result.diagnostics)).not.toMatch(/password|secret|private|hidden/);
   });
 
   it('読み取れないURLがある場合だけ再取得して再解析する', async () => {
     const url = 'https://cdn.example.test/site.css';
-    const first: PageSnapshot = { nodes: [node('0', ['foo'])], rules: [], warnings: ['1 件のスタイルシートを解析できませんでした（別オリジンまたは読み取りエラー）。'],
+    const first: PageSnapshot = { nodes: [node('0', ['foo'])], rules: [], warnings: [],
       selectedLabel: '', originalHtml: '', unreadableStylesheets: [url], recoveredStylesheets: 0 };
     const second: PageSnapshot = { ...first, warnings: [], unreadableStylesheets: [], recoveredStylesheets: 1 };
     const expressions: string[] = [];
@@ -497,5 +512,54 @@ describe('DevTools Resource API', () => {
     expect(expressions[1]).toContain('.foo { color: blue; }');
     expect(result.recoveredStylesheets).toBe(1);
     expect(result.warnings).toEqual([]);
+  });
+
+  it('補完成功と取得不能が混在しても未解析分だけを警告する', async () => {
+    const good = 'https://cdn.example.test/good.css';
+    const missing = 'https://user:password@cdn.example.test/missing.css?token=secret';
+    const first: PageSnapshot = { nodes: [node('0', ['foo'])], rules: [], warnings: [], selectedLabel: '', originalHtml: '',
+      unreadableStylesheets: [good, missing], recoveredStylesheets: 0 };
+    const second: PageSnapshot = { ...first, unreadableStylesheets: [missing], recoveredStylesheets: 1 };
+    let calls = 0;
+    vi.stubGlobal('chrome', { runtime: { getURL: () => 'chrome-extension://test/inspect-page.js' }, devtools: { inspectedWindow: {
+      eval: (_expression: string, callback: (value: PageSnapshot, error: null) => void) => callback(++calls === 1 ? first : second, null),
+      getResources: (callback: (resources: unknown[]) => void) => callback([
+        { url: good, getContent: (done: (content: string, encoding: string) => void) => done('.foo { color: blue; }', '') },
+      ]),
+    } } });
+    const result = await inspect({ mode: 'manual', includeDescendants: false, manualClasses: ['foo'] });
+    expect(result.recoveredStylesheets).toBe(1);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toContain('DevToolsにリソースがありません');
+    expect(result.warnings[0]).toContain('cdn.example.test/missing.css');
+    expect(result.warnings.join(' ')).not.toMatch(/good\.css|password|secret/);
+  });
+});
+
+describe('スタイルシート診断', () => {
+  it('取得したCSSの解析失敗をリソース取得失敗と区別する', () => {
+    const url = 'https://cdn.example.test/broken.css?token=secret';
+    class BrokenSheet { replaceSync(): never { throw new Error('ParseError'); } }
+    vi.stubGlobal('document', { styleSheets: [{ disabled: false, href: url, get cssRules(): never { throw new Error('SecurityError'); } }] });
+    vi.stubGlobal('CSSStyleSheet', BrokenSheet);
+    try {
+      const page = inspectPage({ mode: 'manual', includeDescendants: false, manualClasses: ['foo'] }, null, { [url]: 'invalid' });
+      expect(page.stylesheetDiagnostics).toEqual([{ reason: 'parse-failed', label: 'cdn.example.test/broken.css' }]);
+      expect(page.warnings.join(' ')).not.toContain('token=secret');
+    } finally { vi.unstubAllGlobals(); }
+  });
+
+  it('警告の対象は代表例3件までに収める', () => {
+    const diagnostics = ['a.css', 'b.css', 'c.css', 'd.css'].map((name) =>
+      ({ reason: 'resource-missing' as const, label: stylesheetLabel(`https://cdn.example.test/${name}`) }));
+    const warnings = formatStylesheetDiagnostics(diagnostics);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('4 件');
+    expect(warnings[0]).toContain('a.css');
+    expect(warnings[0]).not.toContain('d.css');
+  });
+
+  it('data URLのCSS本文は診断表示に含めない', () => {
+    expect(stylesheetLabel('data:text/css,.secret%7Bcolor:red%7D')).toBe('data形式のスタイルシート');
   });
 });

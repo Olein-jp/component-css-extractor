@@ -1,5 +1,6 @@
 import type { AnalyzeOptions, PageSnapshot } from '../model/types';
 import { extractTopLevelImports } from '../css/imports';
+import { formatStylesheetDiagnostics, stylesheetLabel, type StylesheetDiagnostic } from '../css/stylesheet-diagnostics';
 
 let inspectorScript: Promise<string> | undefined;
 const MAX_STYLESHEET_LENGTH = 8_000_000;
@@ -36,15 +37,25 @@ export async function inspect(options: AnalyzeOptions): Promise<PageSnapshot> {
   );
   const initial = await evaluateSnapshot({});
   const urls = [...new Set(initial.unreadableStylesheets ?? [])];
-  if (!urls.length) return initial;
+  if (!urls.length) return { ...initial, warnings: [...initial.warnings, ...formatStylesheetDiagnostics(initial.stylesheetDiagnostics ?? [])] };
+  let resourceResult: Awaited<ReturnType<typeof readStyleResources>>;
   try {
-    const { stylesheets, warnings } = await readStyleResources(urls);
-    if (!Object.keys(stylesheets).length) return { ...initial, warnings: [...initial.warnings, ...warnings] };
-    const recovered = await evaluateSnapshot(stylesheets);
-    return { ...recovered, warnings: [...recovered.warnings, ...warnings] };
+    resourceResult = await readStyleResources(urls);
   } catch {
-    return { ...initial, warnings: [...initial.warnings, 'DevToolsから外部CSSを再取得できませんでした。'] };
+    const diagnostics: StylesheetDiagnostic[] = urls.map((url) => ({ reason: 'content-failed', label: stylesheetLabel(url) }));
+    return { ...initial, warnings: [...initial.warnings,
+      ...formatStylesheetDiagnostics([...(initial.stylesheetDiagnostics ?? []), ...diagnostics])] };
   }
+  const { stylesheets, diagnostics } = resourceResult;
+  let result = initial;
+  if (Object.keys(stylesheets).length) {
+    try { result = await evaluateSnapshot(stylesheets); }
+    catch {
+      diagnostics.push(...Object.keys(stylesheets).map((url) => ({ reason: 'evaluation-failed' as const, label: stylesheetLabel(url) })));
+    }
+  }
+  return { ...result, warnings: [...result.warnings,
+    ...formatStylesheetDiagnostics([...(result.stylesheetDiagnostics ?? []), ...diagnostics])] };
 }
 
 interface ResourceContent { content: string; encoding: string }
@@ -68,13 +79,13 @@ async function resourceContent(resource: chrome.devtools.inspectedWindow.Resourc
   });
 }
 
-export async function readStyleResources(urls: string[]): Promise<{ stylesheets: Record<string, string>; warnings: string[] }> {
+export async function readStyleResources(urls: string[]): Promise<{ stylesheets: Record<string, string>; diagnostics: StylesheetDiagnostic[] }> {
   const resources = await new Promise<chrome.devtools.inspectedWindow.Resource[]>((resolve) => {
     chrome.devtools.inspectedWindow.getResources((items) => resolve(items ?? []));
   });
   const byUrl = new Map(resources.map((resource) => [resource.url, resource]));
   const stylesheets: Record<string, string> = {};
-  const warnings = new Set<string>();
+  const diagnostics: StylesheetDiagnostic[] = [];
   let totalLength = 0;
   const pending = [...urls];
   const visited = new Set<string>();
@@ -83,11 +94,14 @@ export async function readStyleResources(urls: string[]): Promise<{ stylesheets:
     if (visited.has(url)) continue;
     visited.add(url);
     const resource = byUrl.get(url);
-    if (!resource) continue;
+    if (!resource) {
+      diagnostics.push({ reason: 'resource-missing', label: stylesheetLabel(url) });
+      continue;
+    }
     try {
       const content = await resourceContent(resource);
       if (content.length > MAX_STYLESHEET_LENGTH || totalLength + content.length > MAX_TOTAL_LENGTH) {
-        warnings.add('容量上限を超えた外部CSSは補完できませんでした。');
+        diagnostics.push({ reason: 'size-limit', label: stylesheetLabel(url) });
         continue;
       }
       stylesheets[url] = content;
@@ -99,9 +113,9 @@ export async function readStyleResources(urls: string[]): Promise<{ stylesheets:
           if (!visited.has(importedUrl)) pending.push(importedUrl);
         } catch { /* The inspector reports an unresolved import. */ }
       }
-    } catch { warnings.add('一部の外部CSS本文を取得できませんでした。'); }
+    } catch { diagnostics.push({ reason: 'content-failed', label: stylesheetLabel(url) }); }
   }
-  return { stylesheets, warnings: [...warnings] };
+  return { stylesheets, diagnostics };
 }
 
 export async function renderHtml(nodes: Array<{ id: string; outputClass: string | null; removeClasses: string[] }>, mode: 'selected' | 'manual'): Promise<string> {

@@ -1,5 +1,6 @@
 import { isSimpleCompound, selectorClasses, selectorForStateMatching, simpleSpecificity, splitSelectorList, stripSupportedSuffix } from '../css/selectors';
 import { extractTopLevelImports } from '../css/imports';
+import { stylesheetLabel, type StylesheetDiagnostic } from '../css/stylesheet-diagnostics';
 import type { AnalyzeOptions, Declaration, ElementNode, PageSnapshot, RuleContext, SourceRule } from '../model/types';
 
 function serializeNode(element: Element, id: string, parentId: string | null): ElementNode {
@@ -57,6 +58,7 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
   let skippedSelectors = 0;
   let recoveredStylesheets = 0;
   const unreadableStylesheets: string[] = [];
+  const stylesheetDiagnostics: StylesheetDiagnostic[] = [];
   const unresolvedImports = new Set<string>();
   const unsupportedImports = new Set<string>();
   const cyclicImports = new Set<string>();
@@ -163,13 +165,15 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
         skippedSelectors = skipped;
         recoveredStylesheets = recovered;
         unresolvedImports.add(importedUrl);
+        if (!stylesheetDiagnostics.some((item) => item.reason === 'parse-failed' && item.label === stylesheetLabel(importedUrl))) {
+          stylesheetDiagnostics.push({ reason: 'parse-failed', label: stylesheetLabel(importedUrl) });
+        }
       }
       finally { stack.delete(importedUrl); }
       return true;
     });
     recoveredStylesheets++;
   }
-  let inaccessible = 0;
   function visitSheet(sheet: CSSStyleSheet, contexts: RuleContext[]): void {
     if (visitedSheets.has(sheet) || sheet.disabled) return;
     visitedSheets.add(sheet);
@@ -183,6 +187,7 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
       skippedSelectors = skipped;
       const href = sheet.href;
       const cssText = href ? fallbackStylesheets[href] : undefined;
+      let parseFailed = false;
       if (cssText !== undefined && href) {
         try {
           visitFallback(href, cssText, contexts, new Set([href]));
@@ -190,10 +195,12 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
         } catch {
           rules.length = ruleCount;
           sourceOrder = order;
+          parseFailed = true;
         }
       }
-      inaccessible++;
       if (href) unreadableStylesheets.push(href);
+      if (parseFailed) stylesheetDiagnostics.push({ reason: 'parse-failed', label: stylesheetLabel(href) });
+      else if (!href) stylesheetDiagnostics.push({ reason: 'cssom-failed', label: stylesheetLabel(null) });
     }
   }
   const ownerDocument = options.mode === 'selected' ? (selected as Element).ownerDocument : document;
@@ -203,14 +210,13 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
     const contexts: RuleContext[] = media && media !== 'all' ? [{ type: 'media', header: `@media ${media}` }] : [];
     visitSheet(sheet, contexts);
   }
-  if (inaccessible) warnings.push(`${inaccessible} 件のスタイルシートを解析できませんでした（別オリジンまたは読み取りエラー）。`);
   if (unresolvedImports.size) warnings.push(`${unresolvedImports.size} 件の @import 先を補完できませんでした。`);
   if (unsupportedImports.size) warnings.push(`${unsupportedImports.size} 件の @import は layer・supports 条件または URL の形式に対応していないため省略しました。`);
   if (cyclicImports.size) warnings.push(`${cyclicImports.size} 件の循環する @import を省略しました。`);
   if (skippedSelectors) warnings.push(`${skippedSelectors} 件のセレクタは解析できず省略しました。`);
   const selectedLabel = nodes[0] ? `<${nodes[0].tagName} class="${nodes[0].classes.join(' ')}">` : '';
   return { nodes, rules, warnings, selectedLabel, originalHtml: options.mode === 'selected' ? (selected as Element).outerHTML.slice(0, 100_000) : '',
-    unreadableStylesheets, recoveredStylesheets };
+    unreadableStylesheets, recoveredStylesheets, stylesheetDiagnostics };
 }
 
 export function renderHtml(classes: Array<{ id: string; outputClass: string | null; removeClasses: string[] }>, selected: Element | null): string {

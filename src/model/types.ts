@@ -1,3 +1,5 @@
+import type { StylesheetDiagnostic } from '../css/stylesheet-diagnostics';
+
 export type ContextType = 'media' | 'supports' | 'container' | 'layer' | 'other';
 
 export interface RuleContext {
@@ -40,6 +42,7 @@ export interface PageSnapshot {
   originalHtml: string;
   unreadableStylesheets?: string[];
   recoveredStylesheets?: number;
+  stylesheetDiagnostics?: StylesheetDiagnostic[];
 }
 
 export interface AnalyzeOptions {
