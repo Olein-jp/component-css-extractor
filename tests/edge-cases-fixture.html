@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Component CSS Extractor 追加テスト</title>
+  <style>
+    /* 案内用の装飾。クラスセレクタを使わず、抽出結果に混ざらないようにします。 */
+    body { max-width: 54rem; margin: 2rem auto; padding: 0 1rem; font-family: system-ui, sans-serif; line-height: 1.6; }
+    section { margin: 2rem 0; padding-top: 1rem; border-top: 1px solid #ccc; }
+    [data-test-target] { display: block; margin: 1rem 0; outline: 2px dashed #888; outline-offset: 4px; }
+    textarea { box-sizing: border-box; display: block; width: 100%; min-height: 10rem; margin: 1rem 0; font: 0.9rem monospace; }
+    iframe { box-sizing: border-box; width: 100%; min-height: 8rem; margin-top: 1rem; border: 1px solid #888; }
+    code { background: #f1f1f1; padding: 0.1em 0.25em; }
+
+    /* 1. 祖先の状態を勝手に取り除いてはいけません。 */
+    .state-target { padding: 0.75rem; }
+    .theme:hover .state-target { color: #b42318; }
+
+    /* 3. コピー後に単体で再現できる例。 */
+    .copy-pad { padding: 1rem; }
+    .copy-shell > .copy-sample[data-copy="ready"] { color: #1765cc; }
+
+    /* 4. 設定ごとに異なる宣言を用意します。 */
+    .toggle-base { border-radius: 8px; }
+    .toggle-hover:hover { color: #b42318; }
+    @media (min-width: 1px) {
+      .toggle-media { letter-spacing: 0.08em; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Component CSS Extractor 追加テスト</h1>
+    <p>このファイルを Chrome で直接開いてください。サーバーや通信は不要です。各テストでは指定した枠内の要素を右クリックして「検証」を選びます。</p>
+
+    <section>
+      <h2>1. 変換できない外側の条件と警告</h2>
+      <p>下の「テスト対象 1」の <code>div.state-target</code> を選択します。CSS Extractor は「Elementsで選択」「選択要素のみ」、ルートのクラス名は <code>state-result</code> にして解析してください。</p>
+      <div class="theme">
+        <div class="state-target" data-test-target="unresolved">テスト対象 1：親要素にマウスが載ると赤くなる</div>
+      </div>
+      <p>期待結果：<code>.theme:hover .state-target</code> は元のまま残り、HTML には <code>state-target</code> が残ります。「選択範囲外の要素・状態に依存します」という警告に、このセレクタが表示されます。親の状態条件を消した <code>.state-result:hover</code> にはなりません。</p>
+    </section>
+
+    <section>
+      <h2>2. 別オリジンの CSS</h2>
+      <p><a href="cross-origin-online-fixture.html">外部 CSS 専用のテストページ</a>を開いてください。サーバーは不要ですが、この項目だけはインターネット接続が必要です。実際の CSS 補完と、補完できない場合の警告の模擬を試せます。</p>
+    </section>
+
+    <section>
+      <h2>3. 「両方コピー」した結果の再現</h2>
+      <p>下の「テスト対象 3」の <code>div.copy-sample</code> を選択します。「Elementsで選択」「選択要素のみ」、ルートのクラス名は <code>copy-result</code> にして解析し、パネルの「両方コピー」を押してください。</p>
+      <div class="copy-shell">
+        <div class="copy-sample copy-pad" data-copy="ready" data-test-target="copy">テスト対象 3：青い文字と余白をコピー</div>
+      </div>
+      <label for="copied-output">コピーした内容をここへ貼り付け</label>
+      <textarea id="copied-output" spellcheck="false" placeholder="HTML、空行、CSS の順に貼り付けます"></textarea>
+      <button id="render-copy" type="button">貼り付けた結果を表示</button>
+      <p id="copy-status" role="status"></p>
+      <iframe id="copy-preview" title="コピーした HTML と CSS のプレビュー" sandbox=""></iframe>
+      <p>期待結果：プレビューでも文字が青く、余白が付きます。出力 HTML に元の <code>copy-sample</code> や外側の <code>copy-shell</code> は不要です。この貼り付け欄は、上の単一の <code>div</code> を「両方コピー」した形式を対象としています。</p>
+    </section>
+
+    <section>
+      <h2>4. CSS を含める設定の切り替え</h2>
+      <p>下の「テスト対象 4」の <code>div.toggle-base</code> を選択します。「Elementsで選択」「選択要素のみ」、ルートのクラス名は <code>toggle-result</code> にします。</p>
+      <div class="toggle-base toggle-hover toggle-media" data-test-target="options">テスト対象 4：設定を切り替えて再解析</div>
+      <ol>
+        <li><code>@media</code> と「疑似クラス」をオンにして解析すると、<code>border-radius</code>、<code>@media (min-width: 1px)</code> 内の <code>letter-spacing</code>、<code>.toggle-result:hover</code> の色が出ます。</li>
+        <li><code>@media</code> をオフにして再解析すると、<code>letter-spacing</code> だけが消えます。</li>
+        <li>「疑似クラス」もオフにして再解析すると、<code>.toggle-result:hover</code> も消え、<code>border-radius</code> は残ります。</li>
+      </ol>
+    </section>
+  </main>
+  <script>
+    document.getElementById('render-copy').addEventListener('click', () => {
+      const pasted = document.getElementById('copied-output').value.trim();
+      const separator = pasted.indexOf('\n\n');
+      const status = document.getElementById('copy-status');
+      if (separator < 0) {
+        status.textContent = '「両方コピー」した HTML と CSS を貼り付けてください。';
+        return;
+      }
+      const html = pasted.slice(0, separator);
+      const css = pasted.slice(separator + 2);
+      if (!html.startsWith('<div') || !css.includes('{')) {
+        status.textContent = 'このページのテスト対象 3 を解析した結果を貼り付けてください。';
+        return;
+      }
+      document.getElementById('copy-preview').srcdoc = `<!doctype html><html><head><style>${css}</style></head><body>${html}</body></html>`;
+      status.textContent = 'プレビューを表示しました。上の元要素と文字色・余白を比べてください。';
+    });
+  </script>
+</body>
+</html>

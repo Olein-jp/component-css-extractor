@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Component CSS Extractor 別オリジン CSS テスト</title>
+  <!-- 別オリジンの CSS。crossorigin を付けず、CSSOM からの直接読み取りを制限します。 -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/Olein-jp/component-css-extractor@v0.1.3/tests/cross-origin.css">
+  <style>
+    body { max-width: 48rem; margin: 2rem auto; padding: 0 1rem; font-family: system-ui, sans-serif; line-height: 1.6; }
+    section { margin: 2rem 0; padding-top: 1rem; border-top: 1px solid #ccc; }
+    [data-test-target] { display: block; margin: 1rem 0; outline: 2px dashed #888; outline-offset: 4px; }
+    code { background: #f1f1f1; padding: 0.1em 0.25em; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>別オリジンの CSS を読み取るテスト</h1>
+    <p>この HTML ファイルを Chrome で直接開いてください。サーバーは不要ですが、外部 CSS を取得するためインターネット接続が必要です。</p>
+    <p id="load-status" role="status">外部 CSS の読み込みを確認中…</p>
+
+    <section>
+      <h2>2-A. 外部 CSS の補完</h2>
+      <p>下の「テスト対象 2」の <code>div.external-pad</code> を右クリックして「検証」を選びます。CSS Extractor は「Elementsで選択」「選択要素のみ」、ルートのクラス名は <code>external-result</code> にして解析してください。</p>
+      <div class="external-pad" data-test-target="external">テスト対象 2：外部 CSS で余白が付く</div>
+      <p>期待結果：CSS に <code>.external-result</code> の余白と <code>@media (min-width: 700px)</code> 内の余白が出ます。ステータスに「外部CSS 1 件を補完しました」と表示され、スタイルシートを解析できなかったという警告は出ません。余白が上下左右に分かれて表示されても正常です。</p>
+    </section>
+
+    <section>
+      <h2>2-B. 補完できない場合の警告を模擬</h2>
+      <p>先に 2-A を確認してから、下のボタンを押してください。DevTools のリソース一覧にない「読み取れないシート」をテスト用に 1 件追加します。実際のネットワーク障害を起こす操作ではありません。</p>
+      <button id="add-missing-sheet" type="button">補完できないシートを模擬</button>
+      <button id="remove-missing-sheet" type="button" disabled>模擬を解除</button>
+      <p id="simulation-status" role="status">模擬は無効です。</p>
+      <p>ボタンを押した後、2-A と同じ要素をもう一度解析します。期待結果：外部 CSS の余白は引き続き出ますが、「1 件のスタイルシートを解析できませんでした」という警告も表示されます。</p>
+    </section>
+  </main>
+  <script>
+    const target = document.querySelector('[data-test-target="external"]');
+    const loadStatus = document.getElementById('load-status');
+    window.addEventListener('load', () => {
+      const padding = getComputedStyle(target).paddingTop;
+      loadStatus.textContent = padding === '0px'
+        ? '外部 CSS が読み込まれていません。通信状態を確認してページを再読み込みしてください。'
+        : `外部 CSS を読み込みました（余白: ${padding}）。2-A を始められます。`;
+    });
+
+    const addButton = document.getElementById('add-missing-sheet');
+    const removeButton = document.getElementById('remove-missing-sheet');
+    const simulationStatus = document.getElementById('simulation-status');
+    addButton.addEventListener('click', () => {
+      const actualSheets = Array.from(document.styleSheets);
+      const missingSheet = {
+        href: 'https://example.invalid/component-css-extractor-missing.css',
+        disabled: false,
+        get cssRules() { throw new DOMException('Test stylesheet is inaccessible', 'SecurityError'); },
+      };
+      try {
+        Object.defineProperty(document, 'styleSheets', {
+          configurable: true,
+          get: () => [...actualSheets, missingSheet],
+        });
+        addButton.disabled = true;
+        removeButton.disabled = false;
+        simulationStatus.textContent = '模擬中です。同じ要素を再解析してください。';
+      } catch {
+        simulationStatus.textContent = 'このブラウザでは模擬シートを追加できませんでした。';
+      }
+    });
+    removeButton.addEventListener('click', () => {
+      delete document.styleSheets;
+      addButton.disabled = false;
+      removeButton.disabled = true;
+      simulationStatus.textContent = '模擬を解除しました。';
+    });
+  </script>
+</body>
+</html>
