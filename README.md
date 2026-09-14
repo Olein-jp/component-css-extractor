@@ -44,14 +44,14 @@ npm run build
 
 ## GitHub Releases 向けパッケージ
 
-`npm run package:release` で現在のバージョンの ZIP（例: `release/component-css-extractor-v0.1.1.zip`）と SHA-256 チェックサムを生成します。ZIP 内の最上位フォルダを展開して、そのフォルダを Chrome の「パッケージ化されていない拡張機能を読み込む」で指定します。ZIP をそのまま Chrome に渡してインストールする方式ではありません。
+`npm run package:release` で現在のバージョンの ZIP（例: `release/component-css-extractor-v0.1.2.zip`）と SHA-256 チェックサムを生成します。ZIP 内の最上位フォルダを展開して、そのフォルダを Chrome の「パッケージ化されていない拡張機能を読み込む」で指定します。ZIP をそのまま Chrome に渡してインストールする方式ではありません。
 
-`package.json` と `manifest.json` のバージョンを揃えたうえで、そのバージョンのタグ（例: `v0.1.1`）を、ワークフローを含むコミットに付けてプッシュすると、GitHub Actions が型チェック・テスト・ZIP 検証を実行し、ZIP とチェックサムを GitHub Release に添付します。テストまたはバージョン照合が失敗した場合は Release を作成しません。タグはブランチのコミットをプッシュした後に付けてください。
+`package.json` と `manifest.json` のバージョンを揃えたうえで、そのバージョンのタグ（例: `v0.1.2`）を、ワークフローを含むコミットに付けてプッシュすると、GitHub Actions が型チェック・テスト・ZIP 検証を実行し、ZIP とチェックサムを GitHub Release に添付します。テストまたはバージョン照合が失敗した場合は Release を作成しません。タグはブランチのコミットをプッシュした後に付けてください。
 
 ```sh
 git push origin main
-git tag v0.1.1
-git push origin v0.1.1
+git tag v0.1.2
+git push origin v0.1.2
 ```
 
 GitHub Actions では自動発行される `GITHUB_TOKEN` を使うため、追加のトークンをリポジトリに登録する必要はありません。ローカルからのプッシュには、通常どおり GitHub の認証が必要です。
