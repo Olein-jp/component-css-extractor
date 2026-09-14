@@ -44,4 +44,14 @@ npm run build
 
 `npm run package:release` で `release/component-css-extractor-v0.1.0.zip` と SHA-256 チェックサムを生成します。ZIP 内の最上位フォルダを展開して、そのフォルダを Chrome の「パッケージ化されていない拡張機能を読み込む」で指定します。ZIP をそのまま Chrome に渡してインストールする方式ではありません。
 
+`package.json` と `manifest.json` のバージョンを揃えたうえで、そのバージョンのタグ（例: `v0.1.0`）を、ワークフローを含むコミットに付けてプッシュすると、GitHub Actions が型チェック・テスト・ZIP 検証を実行し、ZIP とチェックサムを GitHub Release に添付します。テストまたはバージョン照合が失敗した場合は Release を作成しません。タグはブランチのコミットをプッシュした後に付けてください。
+
+```sh
+git push origin main
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+GitHub Actions では自動発行される `GITHUB_TOKEN` を使うため、追加のトークンをリポジトリに登録する必要はありません。ローカルからのプッシュには、通常どおり GitHub の認証が必要です。
+
 実装順序と Issue 分割案は [PLAN.md](PLAN.md) に記載しています。拡張にホスト権限や `tabs` 権限は付与していません。DevTools の `$0` を参照するため、`devtools_page` から `chrome.devtools.inspectedWindow.eval()` を使用します。
