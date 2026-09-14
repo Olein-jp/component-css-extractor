@@ -1,4 +1,5 @@
 import type { AnalyzeOptions, PageSnapshot } from '../model/types';
+import { extractTopLevelImports } from '../css/imports';
 
 let inspectorScript: Promise<string> | undefined;
 const MAX_STYLESHEET_LENGTH = 8_000_000;
@@ -75,7 +76,12 @@ export async function readStyleResources(urls: string[]): Promise<{ stylesheets:
   const stylesheets: Record<string, string> = {};
   const warnings = new Set<string>();
   let totalLength = 0;
-  for (const url of urls) {
+  const pending = [...urls];
+  const visited = new Set<string>();
+  for (let index = 0; index < pending.length; index++) {
+    const url = pending[index];
+    if (visited.has(url)) continue;
+    visited.add(url);
     const resource = byUrl.get(url);
     if (!resource) continue;
     try {
@@ -86,6 +92,13 @@ export async function readStyleResources(urls: string[]): Promise<{ stylesheets:
       }
       stylesheets[url] = content;
       totalLength += content.length;
+      for (const imported of extractTopLevelImports(content).imports) {
+        if (!imported.href || imported.unsupported) continue;
+        try {
+          const importedUrl = new URL(imported.href, url).href;
+          if (!visited.has(importedUrl)) pending.push(importedUrl);
+        } catch { /* The inspector reports an unresolved import. */ }
+      }
     } catch { warnings.add('一部の外部CSS本文を取得できませんでした。'); }
   }
   return { stylesheets, warnings: [...warnings] };

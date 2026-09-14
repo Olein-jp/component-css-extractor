@@ -3,7 +3,21 @@ import { generateOutput, htmlReplacements, type GenerateOptions } from '../src/c
 import { escapeCssIdentifier, isSimpleCompound, normalizeClasses, selectorClasses, selectorForStateMatching, splitSelectorList, stripSupportedSuffix } from '../src/css/selectors';
 import { inspectPage, renderHtml } from '../src/inspector/inspect-page';
 import { inspect, readStyleResources } from '../src/panel/chrome';
+import { extractTopLevelImports } from '../src/css/imports';
 import type { Declaration, ElementNode, PageSnapshot, RuleContext, SourceRule } from '../src/model/types';
+
+describe('CSS import の抽出', () => {
+  it('コメント・文字列・ネスト内のimportを取り違えず、URLとmediaを読む', () => {
+    const source = '/* lead */ @import url("child.css") screen and (min-width: 700px); .foo { content: "@import fake.css;"; } @media all { @import "nested.css"; }';
+    const result = extractTopLevelImports(source);
+    expect(result.imports).toEqual([{
+      marker: '.__component_css_import_marker_0__', href: 'child.css', media: 'screen and (min-width: 700px)', unsupported: false,
+    }]);
+    expect(result.cssText).toContain('.__component_css_import_marker_0__ { }');
+    expect(result.cssText).toContain('content: "@import fake.css;"');
+    expect(result.cssText).toContain('@import "nested.css"');
+  });
+});
 
 const options: GenerateOptions = {
   rootClass: 'card', strategy: 'generated', includeMedia: true, includePseudoClasses: true,
@@ -246,6 +260,75 @@ describe('CSSOM収集', () => {
     expect(page.warnings).toEqual([]);
   });
 
+  it('補完したCSSのimport先を元の位置とmedia条件で解析する', () => {
+    class FakeStyleRule {
+      type = 1;
+      style: { length: number; item: () => string; getPropertyValue: () => string; getPropertyPriority: () => string };
+      constructor(public selectorText: string, value: string) {
+        this.style = { length: value ? 1 : 0, item: () => 'color', getPropertyValue: () => value, getPropertyPriority: () => '' };
+      }
+    }
+    class FakeSheet {
+      cssRules: FakeStyleRule[] = [];
+      replaceSync(text: string): void {
+        this.cssRules = [...text.matchAll(/(\.__component_css_import_marker_\d+__|\.foo)\s*\{\s*(?:color:\s*([^;}]+);?)?\s*\}/g)]
+          .map((match) => new FakeStyleRule(match[1], match[2]?.trim() ?? ''));
+      }
+    }
+    const root = 'https://cdn.example.test/css/main.css';
+    const child = 'https://cdn.example.test/css/child.css';
+    vi.stubGlobal('document', { styleSheets: [{ disabled: false, href: root, get cssRules(): never { throw new Error('SecurityError'); } }] });
+    vi.stubGlobal('CSSStyleSheet', FakeSheet);
+    const page = inspectPage({ mode: 'manual', includeDescendants: false, manualClasses: ['foo'] }, null, {
+      [root]: '.foo { color: red; } @import "child.css" screen and (min-width: 700px); .foo { color: green; }',
+      [child]: '.foo { color: blue; }',
+    });
+    // Imports after a style rule are invalid CSS and must not be promoted into effective rules.
+    expect(page.rules.map((rule) => rule.declarations[0].value)).toEqual(['red', 'green']);
+    const valid = inspectPage({ mode: 'manual', includeDescendants: false, manualClasses: ['foo'] }, null, {
+      [root]: '@import "child.css" screen and (min-width: 700px); .foo { color: green; }',
+      [child]: '.foo { color: blue; }',
+    });
+    expect(valid.rules.map((rule) => rule.declarations[0].value)).toEqual(['blue', 'green']);
+    expect(valid.rules[0].contexts).toEqual([{ type: 'media', header: '@media screen and (min-width: 700px)' }]);
+    expect(valid.rules.map((rule) => rule.sourceOrder)).toEqual([0, 1]);
+    expect(valid.recoveredStylesheets).toBe(2);
+    expect(valid.warnings).toEqual([]);
+  });
+
+  it('通常のCSSOMで読めるimport先は従来どおり解析する', () => {
+    const style = { length: 1, item: () => 'color', getPropertyValue: () => 'blue', getPropertyPriority: () => '' };
+    const child = { disabled: false, cssRules: [{ type: 1, selectorText: '.foo', style }] };
+    const imported = { type: 3, styleSheet: child, media: { mediaText: '(min-width: 700px)' } };
+    vi.stubGlobal('document', { styleSheets: [{ disabled: false, cssRules: [imported] }] });
+    const page = inspectPage({ mode: 'manual', includeDescendants: false, manualClasses: ['foo'] }, null);
+    expect(page.rules).toHaveLength(1);
+    expect(page.rules[0].contexts).toEqual([{ type: 'media', header: '@media (min-width: 700px)' }]);
+    expect(page.recoveredStylesheets).toBe(0);
+    expect(page.warnings).toEqual([]);
+  });
+
+  it('取得できないimport、未対応条件、循環参照を警告する', () => {
+    class FakeSheet {
+      cssRules: Array<{ type: number; selectorText: string; style: { length: number } }> = [];
+      replaceSync(text: string): void {
+        this.cssRules = [...text.matchAll(/(\.__component_css_import_marker_\d+__)\s*\{\s*\}/g)]
+          .map((match) => ({ type: 1, selectorText: match[1], style: { length: 0 } }));
+      }
+    }
+    const root = 'https://cdn.example.test/main.css';
+    const child = 'https://cdn.example.test/child.css';
+    vi.stubGlobal('document', { styleSheets: [{ disabled: false, href: root, get cssRules(): never { throw new Error('SecurityError'); } }] });
+    vi.stubGlobal('CSSStyleSheet', FakeSheet);
+    const page = inspectPage({ mode: 'manual', includeDescendants: false, manualClasses: ['foo'] }, null, {
+      [root]: '@import "child.css"; @import "missing.css"; @import "layer.css" layer(foo);',
+      [child]: '@import "main.css";',
+    });
+    expect(page.warnings).toContain('1 件の @import 先を補完できませんでした。');
+    expect(page.warnings).toContain('1 件の @import は layer・supports 条件または URL の形式に対応していないため省略しました。');
+    expect(page.warnings).toContain('1 件の循環する @import を省略しました。');
+  });
+
   it('一致する複雑なセレクタを元の形で保ち、HTMLに必要なクラスを残す', () => {
     class FakeStyleRule {
       type = 1;
@@ -301,6 +384,32 @@ describe('DevTools Resource API', () => {
     expect(result.stylesheets[urls[1]]).toBe('.bar { color: blue; }');
     expect(result.stylesheets[urls[2]]).toBe('.baz { color: green; }');
     expect(result.warnings).toEqual([]);
+  });
+
+  it('import先を相対URLでたどり、循環時も同じリソースを一度だけ読む', async () => {
+    const root = 'https://example.test/css/main.css';
+    const child = 'https://example.test/css/child.css';
+    const reads: string[] = [];
+    vi.stubGlobal('chrome', { devtools: { inspectedWindow: { getResources: (callback: (resources: unknown[]) => void) => callback([
+      { url: root, getContent: (done: (content: string, encoding: string) => void) => { reads.push(root); done('@import "child.css"; .foo { color: red; }', ''); } },
+      { url: child, getContent: (done: (content: string, encoding: string) => void) => { reads.push(child); done('@import "main.css"; .foo { color: blue; }', ''); } },
+    ]) } } });
+    const result = await readStyleResources([root]);
+    expect(Object.keys(result.stylesheets)).toEqual([root, child]);
+    expect(reads).toEqual([root, child]);
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('import先にも既存の容量上限を適用する', async () => {
+    const root = 'https://example.test/main.css';
+    const child = 'https://example.test/large.css';
+    vi.stubGlobal('chrome', { devtools: { inspectedWindow: { getResources: (callback: (resources: unknown[]) => void) => callback([
+      { url: root, getContent: (done: (content: string, encoding: string) => void) => done('@import "large.css";', '') },
+      { url: child, getContent: (done: (content: string, encoding: string) => void) => done('a'.repeat(8_000_001), '') },
+    ]) } } });
+    const result = await readStyleResources([root]);
+    expect(Object.keys(result.stylesheets)).toEqual([root]);
+    expect(result.warnings).toContain('容量上限を超えた外部CSSは補完できませんでした。');
   });
 
   it('読み取れないURLがある場合だけ再取得して再解析する', async () => {

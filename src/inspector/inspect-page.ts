@@ -1,4 +1,5 @@
 import { isSimpleCompound, selectorClasses, selectorForStateMatching, simpleSpecificity, splitSelectorList, stripSupportedSuffix } from '../css/selectors';
+import { extractTopLevelImports } from '../css/imports';
 import type { AnalyzeOptions, Declaration, ElementNode, PageSnapshot, RuleContext, SourceRule } from '../model/types';
 
 function serializeNode(element: Element, id: string, parentId: string | null): ElementNode {
@@ -56,6 +57,9 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
   let skippedSelectors = 0;
   let recoveredStylesheets = 0;
   const unreadableStylesheets: string[] = [];
+  const unresolvedImports = new Set<string>();
+  const unsupportedImports = new Set<string>();
+  const cyclicImports = new Set<string>();
   const visitedSheets = new Set<CSSStyleSheet>();
   let detachedRoot: Element | null | undefined;
   function needsOuterContext(nodeId: string, selector: string): boolean {
@@ -70,10 +74,11 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
     try { return copy ? !copy.matches(selector) : false; }
     catch { return false; }
   }
-  function traverse(list: CSSRuleList, contexts: RuleContext[]): void {
+  function traverse(list: CSSRuleList, contexts: RuleContext[], onMarker?: (selector: string, contexts: RuleContext[]) => boolean): void {
     for (const rule of Array.from(list)) {
       if (rule.type === 1 && 'selectorText' in rule && 'style' in rule) {
         const styleRule = rule as CSSStyleRule;
+        if (onMarker?.(styleRule.selectorText, contexts)) continue;
         const order = sourceOrder++;
         const declarations: Declaration[] = [];
         for (let i = 0; i < styleRule.style.length; i++) {
@@ -124,9 +129,45 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
         const importContexts: RuleContext[] = media && media !== 'all' ? [...contexts, { type: 'media', header: `@media ${media}` }] : contexts;
         if (imported) visitSheet(imported, importContexts);
       } else if (hasNestedRules(rule)) {
-        traverse(rule.cssRules, [...contexts, contextFor(rule)]);
+        traverse(rule.cssRules, [...contexts, contextFor(rule)], onMarker);
       }
     }
+  }
+  function visitFallback(url: string, cssText: string, contexts: RuleContext[], stack: Set<string>): void {
+    const extracted = extractTopLevelImports(cssText);
+    const byMarker = new Map(extracted.imports.map((item) => [item.marker, item]));
+    const parsed = new CSSStyleSheet();
+    parsed.replaceSync(extracted.cssText);
+    if (cssText.trim() && !parsed.cssRules.length) throw new Error('No CSS rules parsed');
+    traverse(parsed.cssRules, contexts, (selector, currentContexts) => {
+      const imported = byMarker.get(selector);
+      if (!imported) return false;
+      if (imported.unsupported || !imported.href) { unsupportedImports.add(`${url}:${selector}`); return true; }
+      let importedUrl: string;
+      try { importedUrl = new URL(imported.href, url).href; }
+      catch { unresolvedImports.add(`${url}:${selector}`); return true; }
+      if (stack.has(importedUrl)) { cyclicImports.add(importedUrl); return true; }
+      const importedText = fallbackStylesheets[importedUrl];
+      if (importedText === undefined) { unresolvedImports.add(importedUrl); return true; }
+      const mediaContexts: RuleContext[] = imported.media && imported.media !== 'all'
+        ? [...currentContexts, { type: 'media', header: `@media ${imported.media}` }] : currentContexts;
+      stack.add(importedUrl);
+      const ruleCount = rules.length;
+      const order = sourceOrder;
+      const skipped = skippedSelectors;
+      const recovered = recoveredStylesheets;
+      try { visitFallback(importedUrl, importedText, mediaContexts, stack); }
+      catch {
+        rules.length = ruleCount;
+        sourceOrder = order;
+        skippedSelectors = skipped;
+        recoveredStylesheets = recovered;
+        unresolvedImports.add(importedUrl);
+      }
+      finally { stack.delete(importedUrl); }
+      return true;
+    });
+    recoveredStylesheets++;
   }
   let inaccessible = 0;
   function visitSheet(sheet: CSSStyleSheet, contexts: RuleContext[]): void {
@@ -142,14 +183,9 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
       skippedSelectors = skipped;
       const href = sheet.href;
       const cssText = href ? fallbackStylesheets[href] : undefined;
-      if (cssText) {
+      if (cssText !== undefined && href) {
         try {
-          const parsed = new CSSStyleSheet();
-          parsed.replaceSync(cssText);
-          if (cssText.trim() && !parsed.cssRules.length) throw new Error('No CSS rules parsed');
-          traverse(parsed.cssRules, contexts);
-          recoveredStylesheets++;
-          if (/@import\b/i.test(cssText)) warnings.push('補完したCSSの @import は読み込めない場合があります。');
+          visitFallback(href, cssText, contexts, new Set([href]));
           return;
         } catch {
           rules.length = ruleCount;
@@ -168,6 +204,9 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
     visitSheet(sheet, contexts);
   }
   if (inaccessible) warnings.push(`${inaccessible} 件のスタイルシートを解析できませんでした（別オリジンまたは読み取りエラー）。`);
+  if (unresolvedImports.size) warnings.push(`${unresolvedImports.size} 件の @import 先を補完できませんでした。`);
+  if (unsupportedImports.size) warnings.push(`${unsupportedImports.size} 件の @import は layer・supports 条件または URL の形式に対応していないため省略しました。`);
+  if (cyclicImports.size) warnings.push(`${cyclicImports.size} 件の循環する @import を省略しました。`);
   if (skippedSelectors) warnings.push(`${skippedSelectors} 件のセレクタは解析できず省略しました。`);
   const selectedLabel = nodes[0] ? `<${nodes[0].tagName} class="${nodes[0].classes.join(' ')}">` : '';
   return { nodes, rules, warnings, selectedLabel, originalHtml: options.mode === 'selected' ? (selected as Element).outerHTML.slice(0, 100_000) : '',
