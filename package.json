@@ -8,11 +8,13 @@
     "package:release": "npm run build && node scripts/package-release.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:browser": "npm run build && node scripts/browser-smoke.mjs",
     "check": "npm run typecheck && npm test && npm run build"
   },
   "devDependencies": {
     "@types/chrome": "^0.0.287",
     "esbuild": "^0.25.0",
+    "puppeteer-core": "^24.43.1",
     "typescript": "^5.8.0",
     "vitest": "^3.2.0"
   }

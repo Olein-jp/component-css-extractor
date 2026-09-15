@@ -48,11 +48,19 @@ npm test
 npm run build
 ```
 
+実際の Google Chrome に `dist` を拡張として読み込み、主要操作を自動確認するには次を実行します。テスト中は専用の Chrome ウィンドウが開き、完了後に自動で閉じます。通常の Chrome を標準の場所にインストールしていない場合は、`CHROME_BIN` に実行ファイルのパスを指定してください。
+
+```sh
+npm run test:browser
+```
+
+このブラウザテストは、固定されたローカルデータだけを使い、Elements で選択した要素、入力したクラス、子孫要素を含む解析に加え、別オリジン CSS の補完成功と補完失敗時の警告を確認します。外部通信は行いません。自動化にはブラウザを同梱しない `puppeteer-core` を使うため、依存関係のインストール時に数百 MB のテスト用ブラウザを取得する方式を避けています。
+
 ## GitHub Releases 向けパッケージ
 
 `npm run package:release` で現在のバージョンの ZIP（例: `release/component-css-extractor-v0.1.3.zip`）と SHA-256 チェックサムを生成します。ZIP 内の最上位フォルダを展開して、そのフォルダを Chrome の「パッケージ化されていない拡張機能を読み込む」で指定します。ZIP をそのまま Chrome に渡してインストールする方式ではありません。
 
-`package.json` と `manifest.json` のバージョンを揃えたうえで、そのバージョンのタグ（例: `v0.1.3`）を、ワークフローを含むコミットに付けてプッシュすると、GitHub Actions が型チェック・テスト・ZIP 検証を実行し、ZIP とチェックサムを GitHub Release に添付します。テストまたはバージョン照合が失敗した場合は Release を作成しません。タグはブランチのコミットをプッシュした後に付けてください。
+`package.json` と `manifest.json` のバージョンを揃えたうえで、そのバージョンのタグ（例: `v0.1.3`）を、ワークフローを含むコミットに付けてプッシュすると、GitHub Actions が型チェック・単体テスト・Chrome 拡張のブラウザテスト・ZIP 検証を実行し、ZIP とチェックサムを GitHub Release に添付します。テストまたはバージョン照合が失敗した場合は Release を作成しません。タグはブランチのコミットをプッシュした後に付けてください。
 
 ```sh
 git push origin main
