@@ -60,6 +60,17 @@ describe('CSS生成', () => {
     expect(result.warnings.join(' ')).toContain('フォールバックなし 1 件（--space）');
   });
 
+  it('検査時に取得した変数をコンポーネントの先頭へまとめて補完する', () => {
+    const page = { ...snapshot([node('0', ['sample'])], [
+      rule('0', '.sample', 'padding', 'var(--space)', 0),
+      rule('0', '.sample', 'color', 'var(--ink)', 1),
+    ]), customPropertyValues: { '0': { '--space': 'var(--unit)', '--unit': '1rem', '--ink': '#123456' } } };
+    const result = generateOutput(page, { ...options, rootClass: 'component' });
+    expect(result.css).toMatch(/^\.component \{\n  --space: var\(--unit\);\n  --unit: 1rem;\n  --ink: #123456;\n\}\n\n\.component \{/);
+    expect(result.warnings).toEqual([]);
+    expect(result.recoveredCustomProperties).toBe(3);
+  });
+
   it('出力内の定義は警告せず、設定で定義を省いたときは警告を再計算する', () => {
     const page = snapshot([node('0', ['sample'])], [
       rule('0', '.sample', '--space', '1rem', 0),

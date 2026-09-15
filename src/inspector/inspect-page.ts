@@ -1,6 +1,7 @@
 import { isSimpleCompound, selectorClasses, selectorForStateMatching, simpleSpecificity, splitSelectorList, stripSupportedSuffix } from '../css/selectors';
 import { extractTopLevelImports } from '../css/imports';
 import { stylesheetLabel, type StylesheetDiagnostic } from '../css/stylesheet-diagnostics';
+import { varReferences } from '../css/custom-properties';
 import type { AnalyzeOptions, Declaration, ElementNode, PageSnapshot, RuleContext, SourceRule } from '../model/types';
 
 function serializeNode(element: Element, id: string, parentId: string | null): ElementNode {
@@ -214,9 +215,30 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
   if (unsupportedImports.size) warnings.push(`${unsupportedImports.size} 件の @import は layer・supports 条件または URL の形式に対応していないため省略しました。`);
   if (cyclicImports.size) warnings.push(`${cyclicImports.size} 件の循環する @import を省略しました。`);
   if (skippedSelectors) warnings.push(`${skippedSelectors} 件のセレクタは解析できず省略しました。`);
+  const customPropertyValues: Record<string, Record<string, string>> = {};
+  if (options.mode === 'selected') {
+    const pending = rules.flatMap((sourceRule) => sourceRule.declarations.flatMap((declaration) =>
+      varReferences(declaration.value).map((reference) => ({ nodeId: sourceRule.nodeId, name: reference.name }))));
+    const visitedProperties = new Set<string>();
+    for (const item of pending) {
+      const key = `${item.nodeId}:${item.name}`;
+      if (visitedProperties.has(key)) continue;
+      visitedProperties.add(key);
+      const element = elements.get(item.nodeId);
+      if (!element) continue;
+      const value = getComputedStyle(element).getPropertyValue(item.name).trim();
+      if (!value) continue;
+      const values = customPropertyValues[item.nodeId] ?? (customPropertyValues[item.nodeId] = {});
+      values[item.name] = value;
+      for (const reference of varReferences(value)) {
+        const nestedKey = `${item.nodeId}:${reference.name}`;
+        if (!visitedProperties.has(nestedKey)) pending.push({ nodeId: item.nodeId, name: reference.name });
+      }
+    }
+  }
   const selectedLabel = nodes[0] ? `<${nodes[0].tagName} class="${nodes[0].classes.join(' ')}">` : '';
   return { nodes, rules, warnings, selectedLabel, originalHtml: options.mode === 'selected' ? (selected as Element).outerHTML.slice(0, 100_000) : '',
-    unreadableStylesheets, recoveredStylesheets, stylesheetDiagnostics };
+    unreadableStylesheets, recoveredStylesheets, stylesheetDiagnostics, customPropertyValues };
 }
 
 export function renderHtml(classes: Array<{ id: string; outputClass: string | null; removeClasses: string[] }>, selected: Element | null): string {

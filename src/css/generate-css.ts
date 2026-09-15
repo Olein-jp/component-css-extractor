@@ -105,6 +105,7 @@ export function generateOutput(snapshot: PageSnapshot, options: GenerateOptions)
     warnings.push('DOMセレクタのルートクラスが元のHTMLにありません。既存のクラス名を指定してください。');
   }
   const blocks: string[] = [];
+  const variableBlocks: string[] = [];
   const unresolvedDependencies = new Set<string>();
   const definedProperties = new Map<string, Set<string>>();
   const referencedProperties: Array<{ nodeId: string; name: string; hasFallback: boolean }> = [];
@@ -133,7 +134,13 @@ export function generateOutput(snapshot: PageSnapshot, options: GenerateOptions)
       }
     }
     for (const segment of segments.filter((item) => item.declarations.size)) {
-      blocks.push(renderSegment(segment));
+      const variables = new Map<string, SelectedDeclaration>();
+      const declarations = new Map<string, SelectedDeclaration>();
+      for (const [property, declaration] of segment.declarations) {
+        (property.startsWith('--') ? variables : declarations).set(property, declaration);
+      }
+      if (variables.size) variableBlocks.push(renderSegment({ ...segment, declarations: variables }));
+      if (declarations.size) blocks.push(renderSegment({ ...segment, declarations }));
       for (const declaration of segment.declarations.values()) {
         if (declaration.property.startsWith('--')) {
           const names = definedProperties.get(node.id) ?? new Set<string>();
@@ -146,21 +153,34 @@ export function generateOutput(snapshot: PageSnapshot, options: GenerateOptions)
       }
     }
   }
-  if (!blocks.length) warnings.push('一致するCSSルールが見つかりませんでした。');
+  const recoveredVariables = new Map<string, Map<string, string>>();
   if (unresolvedDependencies.size) {
     const examples = [...unresolvedDependencies].slice(0, 3).map((selector) => `「${selector}」`).join('、');
     warnings.push(`${unresolvedDependencies.size} 件のセレクタは選択範囲外の要素・状態に依存します（${examples}）。コピーしたHTMLだけではスタイルを再現できない場合があります。`);
   }
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const missingByName = new Map<string, boolean>();
-  for (const reference of referencedProperties) {
+  const recoveredReferences = [...referencedProperties];
+  for (let index = 0; index < recoveredReferences.length; index++) {
+    const reference = recoveredReferences[index];
     let nodeId: string | null = reference.nodeId;
     let found = false;
     while (nodeId) {
       if (definedProperties.get(nodeId)?.has(reference.name)) { found = true; break; }
       nodeId = nodeById.get(nodeId)?.parentId ?? null;
     }
-    if (!found) missingByName.set(reference.name, (missingByName.get(reference.name) ?? true) && reference.hasFallback);
+    if (!found) {
+      const value = options.includeCustomProperties ? snapshot.customPropertyValues?.[reference.nodeId]?.[reference.name] : undefined;
+      if (value) {
+        const values = recoveredVariables.get(reference.nodeId) ?? new Map<string, string>();
+        values.set(reference.name, value);
+        recoveredVariables.set(reference.nodeId, values);
+        const nestedReferences = varReferences(value).map((nested) => ({ nodeId: reference.nodeId, ...nested }));
+        recoveredReferences.splice(index + 1, 0, ...nestedReferences);
+      } else {
+        missingByName.set(reference.name, (missingByName.get(reference.name) ?? true) && reference.hasFallback);
+      }
+    }
   }
   const missingProperties = [...missingByName];
   if (missingProperties.length) {
@@ -173,7 +193,17 @@ export function generateOutput(snapshot: PageSnapshot, options: GenerateOptions)
     ].filter(Boolean).join('、');
     warnings.push(`出力CSSで定義されていないカスタムプロパティがあります：${details}。コピー先では見た目が変わる場合があります。`);
   }
-  return { css: blocks.join('\n\n'), html: snapshot.originalHtml, warnings, nodes };
+  for (const [nodeId, values] of recoveredVariables) {
+    const node = nodeById.get(nodeId);
+    if (!node || !values.size) continue;
+    const declarations = new Map<string, SelectedDeclaration>();
+    for (const [property, value] of values) declarations.set(property, { property, value, important: false, sourceOrder: -1, specificity: 0 });
+    variableBlocks.unshift(renderSegment({ selector: node.outputSelector, contexts: [], declarations }));
+  }
+  if (!blocks.length && !variableBlocks.length) warnings.push('一致するCSSルールが見つかりませんでした。');
+  const cssBlocks = [...variableBlocks, ...blocks];
+  return { css: cssBlocks.join('\n\n'), html: snapshot.originalHtml, warnings, nodes,
+    recoveredCustomProperties: [...recoveredVariables.values()].reduce((total, values) => total + values.size, 0) };
 }
 
 export function htmlReplacements(snapshot: PageSnapshot, nodes: OutputNode[]): Array<{ id: string; outputClass: string; removeClasses: string[] }> {

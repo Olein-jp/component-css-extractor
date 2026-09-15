@@ -118,6 +118,14 @@ try {
   });
   await frame.waitForSelector('#analyze');
 
+  await evalInspected(frame, `(() => {
+    document.documentElement.style.setProperty('--fixture-space', '1rem');
+    const style = document.createElement('style');
+    style.textContent = '.fixture-var { padding: var(--fixture-space); }';
+    document.head.append(style);
+    document.querySelector('[data-test-target="complex"]').classList.add('fixture-var');
+    return true;
+  })()`);
   await select(frame, '[data-test-target="complex"]');
   await setValue(frame, '#root-class', 'component-test');
   const selected = await analyze(frame);
@@ -125,6 +133,7 @@ try {
   assert.match(selected.html, /class="component-test" data-state="ready"/);
   assert.match(selected.css, /\.component-test\[data-state="ready"\] \{\s+color: rgb\(23, 101, 204\)/);
   assert.match(selected.css, /@media \(min-width: 700px\)/);
+  assert.match(selected.css, /--fixture-space: 1rem/);
   assert.doesNotMatch(selected.css, /fixture-shell/);
   assert.equal(selected.warnings, '');
   console.log('✓ Elements で選択した要素を抽出');

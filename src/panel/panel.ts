@@ -105,7 +105,8 @@ async function analyze(): Promise<void> {
     copyHtml.disabled = !result.html;
     copyBoth.disabled = !result.css && !result.html;
     const recovered = snapshot.recoveredStylesheets ? ` 外部CSS ${snapshot.recoveredStylesheets} 件を補完しました。` : '';
-    status.textContent = result.css ? `${result.nodes.length} 要素を解析しました。${recovered}` : '一致するCSSがありません。';
+    const variables = result.recoveredCustomProperties ? ` CSS変数 ${result.recoveredCustomProperties} 件を補完しました。` : '';
+    status.textContent = result.css ? `${result.nodes.length} 要素を解析しました。${recovered}${variables}` : '一致するCSSがありません。';
   } catch (error) {
     if (version === requestVersion) {
       status.textContent = error instanceof Error ? error.message : '解析に失敗しました。';

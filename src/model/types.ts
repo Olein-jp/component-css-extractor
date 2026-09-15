@@ -42,6 +42,7 @@ export interface PageSnapshot {
   originalHtml: string;
   unreadableStylesheets?: string[];
   recoveredStylesheets?: number;
+  customPropertyValues?: Record<string, Record<string, string>>;
   stylesheetDiagnostics?: StylesheetDiagnostic[];
 }
 
@@ -61,4 +62,5 @@ export interface GeneratedOutput {
   html: string;
   warnings: string[];
   nodes: OutputNode[];
+  recoveredCustomProperties?: number;
 }
