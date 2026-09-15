@@ -81,6 +81,34 @@ describe('CSS生成', () => {
     expect(generateOutput(page, options).warnings.join(' ')).not.toContain('選択範囲外の親要素から継承');
   });
 
+  it('選択範囲のインラインスタイルを警告し、HTMLでは保持する', () => {
+    const root = { ...node('0', ['inline-target']), attributes: { style: 'color: red' } };
+    const page = { ...snapshot([root], [rule('0', '.inline-target', 'color', 'blue', 0)]),
+      originalHtml: '<div class="inline-target" style="color: red">text</div>' };
+    const output = generateOutput(page, { ...options, rootClass: 'component-test' });
+    expect(output.css).toBe('.component-test {\n  color: blue;\n}');
+    expect(output.warnings.join(' ')).toContain('CSS だけをコピーしてもインライン宣言は含まれません');
+    expect(output.warnings.join(' ')).toContain('HTML と CSS の両方をコピーすると style 属性は保持されます');
+    const clone = {
+      classList: ['inline-target'], children: { item: () => null },
+      setAttribute(_name: string, value: string) { this.classList = value.split(' '); },
+      get outerHTML() { return `<div class="${this.classList.join(' ')}" style="color: red">text</div>`; },
+    };
+    const selected = { nodeType: 1, cloneNode: () => clone } as unknown as Element;
+    expect(renderHtml(htmlReplacements(page, output.nodes), selected))
+      .toBe('<div class="component-test" style="color: red">text</div>');
+  });
+
+  it('子孫のインラインスタイルも数え、style属性がない場合は警告しない', () => {
+    const child = { ...node('0.0', ['child'], 'span', '0'), attributes: { style: 'font-weight: 700' } };
+    const withInlineStyle = generateOutput(snapshot([node('0', ['root']), child], []), options);
+    expect(withInlineStyle.warnings.join(' ')).toContain('選択範囲内の 1 要素に style 属性があります');
+    const withoutInlineStyle = generateOutput(snapshot([node('0', ['root'])], []), options);
+    expect(withoutInlineStyle.warnings.join(' ')).not.toContain('style 属性があります');
+    const emptyStyle = { ...node('0', ['root']), attributes: { style: '  ' } };
+    expect(generateOutput(snapshot([emptyStyle], []), options).warnings.join(' ')).not.toContain('style 属性があります');
+  });
+
   it('外側のrootにしかない変数定義への依存を警告する', () => {
     const page = snapshot([node('0', ['sample'])], [rule('0', '.sample', 'padding', 'var(--space)', 0)]);
     const result = generateOutput(page, { ...options, rootClass: 'sample' });

@@ -42,7 +42,7 @@
     <section>
       <h2>3. インラインスタイル</h2>
       <div class="inline-target" style="color: red" data-test-target="inline">赤い文字。CSS ルールは青、style 属性は赤。</div>
-      <p>現行の抽出 CSS は青いルールだけです。HTML と CSS を両方コピーすれば style 属性が残るため赤を再現できますが、CSS だけを別の HTML に使うと青になります。</p>
+      <p>期待結果：抽出 CSS は青いルールのままで、CSS 単独コピーにはインライン宣言が含まれない旨の警告が表示されます。生成 HTML には <code>style="color: red"</code> が残り、HTML と CSS の両方をコピーすれば赤を再現できます。</p>
     </section>
 
     <section>

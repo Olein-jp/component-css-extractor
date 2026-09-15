@@ -169,6 +169,10 @@ export function generateOutput(snapshot: PageSnapshot, options: GenerateOptions)
       warnings.push(`選択要素の色（${snapshot.inheritedRootColor}）は選択範囲外の親要素から継承されています。コピー先では色が変わる場合があります。`);
     }
   }
+  const inlineStyleCount = snapshot.nodes.filter((node) => node.attributes.style?.trim()).length;
+  if (inlineStyleCount) {
+    warnings.push(`選択範囲内の ${inlineStyleCount} 要素に style 属性があります。CSS だけをコピーしてもインライン宣言は含まれません。HTML と CSS の両方をコピーすると style 属性は保持されます。`);
+  }
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const missingByName = new Map<string, boolean>();
   const recoveredReferences = [...referencedProperties];

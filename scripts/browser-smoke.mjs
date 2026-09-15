@@ -200,6 +200,17 @@ try {
   console.log('✓ :where() 内の状態を通常時とホバー時に保持');
 
   await inspected.goto(pathToFileURL(resolve('tests/cascade-investigation-fixture.html')).href);
+  await waitFor(() => evalInspected(frame, 'document.title').then((value) => value === cascadeTitle), 'インラインスタイルのテストページ');
+  await select(frame, '[data-test-target="inline"]');
+  await setValue(frame, '#root-class', 'inline-result');
+  const inlineStyle = await analyze(frame);
+  assert.match(inlineStyle.css, /\.inline-result \{\s+color: blue;/);
+  assert.match(inlineStyle.html, /class="inline-result" style="color: red"/);
+  assert.match(inlineStyle.warnings, /CSS だけをコピーしてもインライン宣言は含まれません/);
+  assert.match(inlineStyle.warnings, /HTML と CSS の両方をコピーすると style 属性は保持されます/);
+  console.log('✓ インラインスタイルの CSS 単独コピーを警告');
+
+  await inspected.goto(pathToFileURL(resolve('tests/cascade-investigation-fixture.html')).href);
   await waitFor(() => evalInspected(frame, 'document.title').then((value) => value === cascadeTitle), '継承色のテストページ');
   await select(frame, '[data-test-target="inheritance"]');
   await setValue(frame, '#root-class', 'inheritance-result');
