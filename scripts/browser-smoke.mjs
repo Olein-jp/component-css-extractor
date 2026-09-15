@@ -250,6 +250,14 @@ try {
   assert.match(missing.warnings, /example\.invalid\/component-css-extractor-missing\.css/);
   console.log('✓ 補完できない CSS の警告と正常な CSS の保持');
 } finally {
-  await browser?.close();
-  await Promise.all(servers.map((server) => new Promise((done) => server.close(done))));
+  if (browser) {
+    const browserProcess = browser.process();
+    const forceClose = setTimeout(() => browserProcess?.kill('SIGKILL'), 5000);
+    try { await browser.close(); }
+    finally { clearTimeout(forceClose); }
+  }
+  await Promise.all(servers.map((server) => {
+    server.closeAllConnections?.();
+    return new Promise((done) => server.close(done));
+  }));
 }
