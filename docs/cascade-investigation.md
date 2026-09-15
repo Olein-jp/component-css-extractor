@@ -2,7 +2,7 @@
 
 この調査では抽出ロジックを変更しない。再現ページは `tests/cascade-investigation-fixture.html`。Chrome でファイルを直接開き、各対象要素を選択して「選択要素のみ」、ルートクラス `component-test` で解析する。下表の現行 CSS は、同じ入力に相当するスナップショットを現行の `generateOutput()` に渡して確認したもの。ブラウザ側の期待は [CSS Cascade Level 5](https://www.w3.org/TR/css-cascade-5/)、[:where() の詳細度](https://www.w3.org/TR/selectors-4/#zero-matches)、[style 属性の優先順位](https://www.w3.org/TR/css-style-attr/)に基づく。
 
-この文書は調査時点の記録である。レイヤー順序の欠落は Issue #7 で修正し、名前付きレイヤーの初出順から順序宣言を再構成するようになった。
+この文書は調査時点の記録である。レイヤー順序の欠落は Issue #7 で修正し、名前付きレイヤーの初出順から順序宣言を再構成するようになった。関数内状態の欠落は Issue #8 で修正し、`:where()` と `:is()` の単純な引数内にある状態を対象判定時だけ除くようになった。
 
 | ケースと最小入力 | 元ページの表示 | 現行の抽出結果 | コピー先・CSS 単独での差 | 推奨する扱い |
 | --- | --- | --- | --- | --- |

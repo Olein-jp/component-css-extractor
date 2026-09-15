@@ -1,4 +1,4 @@
-import { isSimpleCompound, selectorClasses, selectorForStateMatching, simpleSpecificity, splitSelectorList, stripSupportedSuffix } from '../css/selectors';
+import { hasSupportedState, isSimpleCompound, selectorClasses, selectorForStateMatching, simpleSpecificity, splitSelectorList, stripSupportedSuffix } from '../css/selectors';
 import { extractTopLevelImports } from '../css/imports';
 import { stylesheetLabel, type StylesheetDiagnostic } from '../css/stylesheet-diagnostics';
 import { varReferences } from '../css/custom-properties';
@@ -61,6 +61,7 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
   const rules: SourceRule[] = [];
   let sourceOrder = 0;
   let skippedSelectors = 0;
+  const skippedStateSelectors = new Set<string>();
   let recoveredStylesheets = 0;
   const unreadableStylesheets: string[] = [];
   const stylesheetDiagnostics: StylesheetDiagnostic[] = [];
@@ -110,19 +111,30 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
           if (!selectorNames.some((name) => classNodes.has(name))) continue;
           const parts = stripSupportedSuffix(selector);
           if (!parts || !isSimpleCompound(parts.base)) {
-            if (options.mode === 'manual') { skippedSelectors++; continue; }
+            if (options.mode === 'manual') {
+              if (hasSupportedState(selector)) skippedStateSelectors.add(selector);
+              else skippedSelectors++;
+              continue;
+            }
             const matchSelector = selectorForStateMatching(selector);
+            let matched = false;
+            let stateCouldNotBeEvaluated = false;
             for (const node of nodes) {
               const element = elements.get(node.id);
               if (!element) continue;
               try {
                 if (element.matches(matchSelector)) {
+                  matched = true;
                   rules.push({ nodeId: node.id, originalSelector: selector, suffix: '', specificity: 0,
                     contexts, declarations, sourceOrder: order, preserveSelector: true,
                     externalDependency: needsOuterContext(node.id, matchSelector) });
-                }
-              } catch { skippedSelectors++; }
+                } else if (hasSupportedState(matchSelector)) stateCouldNotBeEvaluated = true;
+              } catch {
+                if (hasSupportedState(matchSelector)) stateCouldNotBeEvaluated = true;
+                else skippedSelectors++;
+              }
             }
+            if (!matched && stateCouldNotBeEvaluated) skippedStateSelectors.add(selector);
             continue;
           }
           const names = selectorClasses(parts.base);
@@ -236,6 +248,10 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
   if (unsupportedImports.size) warnings.push(`${unsupportedImports.size} 件の @import は layer・supports 条件または URL の形式に対応していないため省略しました。`);
   if (cyclicImports.size) warnings.push(`${cyclicImports.size} 件の循環する @import を省略しました。`);
   if (skippedSelectors) warnings.push(`${skippedSelectors} 件のセレクタは解析できず省略しました。`);
+  if (skippedStateSelectors.size) {
+    const examples = [...skippedStateSelectors].slice(0, 3).map((selector) => `「${selector}」`).join('、');
+    warnings.push(`${skippedStateSelectors.size} 件の状態セレクタは非アクティブ時の対象を安全に判定できないため省略しました（${examples}）。`);
+  }
   const customPropertyValues: Record<string, Record<string, string>> = {};
   if (options.mode === 'selected') {
     const pending = rules.flatMap((sourceRule) => sourceRule.declarations.flatMap((declaration) =>

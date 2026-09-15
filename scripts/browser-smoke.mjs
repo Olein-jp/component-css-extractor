@@ -181,6 +181,24 @@ try {
   assert.equal(reproducedColor, 'rgb(0, 0, 255)');
   console.log('✓ @layer の順序と表示色を保持');
 
+  await inspected.goto(pathToFileURL(resolve('tests/cascade-investigation-fixture.html')).href);
+  await waitFor(() => evalInspected(frame, 'document.title').then((value) => value === cascadeTitle), '状態セレクタのテストページ');
+  await select(frame, '[data-test-target="where"]');
+  await setValue(frame, '#root-class', 'where-result');
+  const functionalState = await analyze(frame);
+  assert.match(functionalState.css, /\.where-target:where\(:hover\)/);
+  assert.match(functionalState.html, /class="where-target where-result"/);
+  const normalColor = await evalInspected(frame, `(() => {
+    document.head.replaceChildren(); document.body.innerHTML = ${JSON.stringify(functionalState.html)};
+    const style = document.createElement('style'); style.textContent = ${JSON.stringify(functionalState.css)}; document.head.append(style);
+    return getComputedStyle(document.querySelector('.where-target')).color;
+  })()`);
+  assert.equal(normalColor, 'rgb(0, 0, 255)');
+  await inspected.hover('.where-target');
+  const hoverColor = await evalInspected(frame, 'getComputedStyle(document.querySelector(".where-target")).color');
+  assert.equal(hoverColor, 'rgb(255, 0, 0)');
+  console.log('✓ :where() 内の状態を通常時とホバー時に保持');
+
   const css = await readFile(resolve('tests/cross-origin.css'));
   const cssOrigin = await serve((request, response) => {
     response.writeHead(200, { 'Content-Type': 'text/css' }); response.end(css);

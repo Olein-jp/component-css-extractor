@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { generateOutput, htmlReplacements, type GenerateOptions } from '../src/css/generate-css';
-import { escapeCssIdentifier, isSimpleCompound, normalizeClasses, selectorClasses, selectorForStateMatching, splitSelectorList, stripSupportedSuffix } from '../src/css/selectors';
+import { escapeCssIdentifier, hasSupportedState, isSimpleCompound, normalizeClasses, selectorClasses, selectorForStateMatching, splitSelectorList, stripSupportedSuffix } from '../src/css/selectors';
 import { inspectPage, renderHtml } from '../src/inspector/inspect-page';
 import { inspect, readStyleResources } from '../src/panel/chrome';
 import { extractTopLevelImports } from '../src/css/imports';
@@ -254,6 +254,16 @@ describe('セレクタ解析', () => {
     expect(selectorForStateMatching('.parent:hover .foo::before')).toBe('.parent .foo');
   });
 
+  it('whereとisの単純な引数内だけから状態を除く', () => {
+    expect(selectorForStateMatching('.foo:where(:hover)')).toBe('.foo:where(*)');
+    expect(selectorForStateMatching('.foo:where(.active, :hover)')).toBe('.foo:where(.active, *)');
+    expect(selectorForStateMatching('.foo:is([aria-current]:focus, .selected)')).toBe('.foo:is([aria-current], .selected)');
+    expect(selectorForStateMatching('.foo:not(:hover):where(:focus)')).toBe('.foo:not(:hover):where(*)');
+    expect(selectorForStateMatching('.foo:where(.parent :hover)')).toBe('.foo:where(.parent :hover)');
+    expect(hasSupportedState('.foo:not(:hover)')).toBe(true);
+    expect(hasSupportedState('.foo:where(*)')).toBe(false);
+  });
+
   it('関数内のカンマではセレクタを分割しない', () => {
     expect(splitSelectorList('.foo:is(.a,.b), .bar')).toEqual(['.foo:is(.a,.b)', '.bar']);
     expect(normalizeClasses('.p-4 .bold,md:p-8')).toEqual(['p-4', 'bold', 'md:p-8']);
@@ -470,6 +480,39 @@ describe('CSSOM収集', () => {
     expect(output.css).toContain('.foo:not(.disabled) {');
     expect(output.warnings.join(' ')).toContain('.parent:hover .foo');
     expect(htmlReplacements(page, output.nodes)).toEqual([{ id: '0', outputClass: 'card', removeClasses: [] }]);
+  });
+
+  it('where内の状態を対象判定時だけ除き、元のセレクタを保持する', () => {
+    const selector = '.where-target:where(:hover)';
+    const styleRule = { type: 1, selectorText: selector,
+      style: { length: 1, item: () => 'color', getPropertyValue: () => 'red', getPropertyPriority: () => '' } };
+    const ownerDocument = { styleSheets: [{ disabled: false, cssRules: [styleRule] }] };
+    const selected = { nodeType: 1, tagName: 'DIV', classList: ['where-target'],
+      attributes: [{ name: 'class', value: 'where-target' }], children: [], ownerDocument,
+      outerHTML: '<div class="where-target"></div>',
+      matches: (value: string) => value === '.where-target:where(*)',
+      cloneNode: () => ({ matches: (value: string) => value === '.where-target:where(*)' }),
+    } as unknown as Element;
+    const page = inspectPage({ mode: 'selected', includeDescendants: false, manualClasses: [] }, selected);
+    expect(page.rules).toHaveLength(1);
+    expect(page.warnings).toEqual([]);
+    const output = generateOutput(page, { ...options, rootClass: 'component-test' });
+    expect(output.css).toContain(`${selector} {\n  color: red;\n}`);
+    expect(htmlReplacements(page, output.nodes)[0].removeClasses).toEqual([]);
+  });
+
+  it('安全に判定できない関数内状態は専用警告だけを出す', () => {
+    const selector = '.foo:where(.parent :hover)';
+    const styleRule = { type: 1, selectorText: selector,
+      style: { length: 1, item: () => 'color', getPropertyValue: () => 'red', getPropertyPriority: () => '' } };
+    const ownerDocument = { styleSheets: [{ disabled: false, cssRules: [styleRule] }] };
+    const selected = { nodeType: 1, tagName: 'DIV', classList: ['foo'], attributes: [{ name: 'class', value: 'foo' }],
+      children: [], ownerDocument, outerHTML: '<div class="foo"></div>', matches: () => false,
+      cloneNode: () => ({ matches: () => false }) } as unknown as Element;
+    const page = inspectPage({ mode: 'selected', includeDescendants: false, manualClasses: [] }, selected);
+    expect(page.rules).toEqual([]);
+    expect(page.warnings.join(' ')).toContain('状態セレクタは非アクティブ時の対象を安全に判定できない');
+    expect(page.warnings.join(' ')).not.toContain('セレクタは解析できず省略');
   });
 
   it('親クラスだけを参照するルールも子孫ノードのCSSとして保持する', () => {

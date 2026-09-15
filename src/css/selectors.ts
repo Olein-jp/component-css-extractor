@@ -81,29 +81,99 @@ export function stripSupportedSuffix(selector: string): { base: string; suffix: 
   return { base, suffix };
 }
 
-export function selectorForStateMatching(selector: string): string {
-  // Remove only top-level dynamic states for matching; the original selector is kept in output.
+function compoundFunctionArgument(input: string): boolean {
+  let depth = 0;
+  let bracketDepth = 0;
+  let quote = '';
+  for (let index = 0; index < input.length; index++) {
+    const char = input[index];
+    if (char === '\\') { index++; continue; }
+    if (quote) { if (char === quote) quote = ''; continue; }
+    if (char === '"' || char === "'") { quote = char; continue; }
+    if (char === '[') bracketDepth++;
+    else if (char === ']') bracketDepth--;
+    else if (!bracketDepth && char === '(') depth++;
+    else if (!bracketDepth && char === ')') depth--;
+    else if (!depth && !bracketDepth && /[>+~\s]/.test(char)) return false;
+  }
+  return true;
+}
+
+function closingParenthesis(input: string, open: number): number {
+  let depth = 1;
+  let bracketDepth = 0;
+  let quote = '';
+  for (let index = open + 1; index < input.length; index++) {
+    const char = input[index];
+    if (char === '\\') { index++; continue; }
+    if (quote) { if (char === quote) quote = ''; continue; }
+    if (char === '"' || char === "'") { quote = char; continue; }
+    if (char === '[') bracketDepth++;
+    else if (char === ']') bracketDepth--;
+    else if (!bracketDepth && char === '(') depth++;
+    else if (!bracketDepth && char === ')' && --depth === 0) return index;
+  }
+  return -1;
+}
+
+function stripStates(input: string): string {
   let result = '';
   let depth = 0;
   let bracketDepth = 0;
   let quote = '';
-  for (let i = 0; i < selector.length; i++) {
-    const char = selector[i];
-    if (char === '\\') { result += selector.slice(i, i + 2); i++; continue; }
+  for (let i = 0; i < input.length; i++) {
+    const char = input[i];
+    if (char === '\\') { result += input.slice(i, i + 2); i++; continue; }
     if (quote) { result += char; if (char === quote) quote = ''; continue; }
     if (char === '"' || char === "'") { quote = char; result += char; continue; }
     if (char === '[') bracketDepth++;
     if (char === ']') bracketDepth--;
-    if (char === '(') depth++;
-    if (char === ')') depth--;
-    if (char === ':' && depth === 0 && bracketDepth === 0 && selector[i + 1] !== ':') {
-      const state = supportedStates.find((name) => selector.slice(i + 1).startsWith(name)
-        && !/[-_a-zA-Z0-9]/.test(selector[i + name.length + 1] ?? ''));
+    if (char === ':' && depth === 0 && bracketDepth === 0 && input[i + 1] !== ':') {
+      const state = supportedStates.find((name) => input.slice(i + 1).startsWith(name)
+        && !/[-_a-zA-Z0-9]/.test(input[i + name.length + 1] ?? ''));
       if (state) { i += state.length; continue; }
+      const functional = /^:([a-z-]+)\(/i.exec(input.slice(i));
+      if (functional && ['where', 'is'].includes(functional[1].toLowerCase())) {
+        const open = i + functional[0].length - 1;
+        const close = closingParenthesis(input, open);
+        if (close > open) {
+          const argumentsList = splitSelectorList(input.slice(open + 1, close));
+          const transformed = argumentsList.map((argument) => compoundFunctionArgument(argument)
+            ? stripStates(argument) || '*'
+            : argument);
+          result += `${input.slice(i, open + 1)}${transformed.join(', ')})`;
+          i = close;
+          continue;
+        }
+      }
     }
+    if (!bracketDepth && char === '(') depth++;
+    if (!bracketDepth && char === ')') depth--;
     result += char;
   }
-  return result.replace(/(?<!\\)::(before|after|marker|placeholder)$/i, '');
+  return result;
+}
+
+export function selectorForStateMatching(selector: string): string {
+  // 対象判定用のセレクタだけから状態を除き、出力には元のセレクタを保持します。
+  return stripStates(selector).replace(/(?<!\\)::(before|after|marker|placeholder)$/i, '');
+}
+
+export function hasSupportedState(selector: string): boolean {
+  let bracketDepth = 0;
+  let quote = '';
+  for (let index = 0; index < selector.length; index++) {
+    const char = selector[index];
+    if (char === '\\') { index++; continue; }
+    if (quote) { if (char === quote) quote = ''; continue; }
+    if (char === '"' || char === "'") { quote = char; continue; }
+    if (char === '[') { bracketDepth++; continue; }
+    if (char === ']') { bracketDepth--; continue; }
+    if (char !== ':' || bracketDepth || selector[index + 1] === ':') continue;
+    if (supportedStates.some((name) => selector.slice(index + 1).startsWith(name)
+      && !/[-_a-zA-Z0-9]/.test(selector[index + name.length + 1] ?? ''))) return true;
+  }
+  return false;
 }
 
 export function isSimpleCompound(selector: string): boolean {

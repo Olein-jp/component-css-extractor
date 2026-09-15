@@ -36,7 +36,7 @@
     <section>
       <h2>2. :where() 内の状態</h2>
       <div class="where-target" data-test-target="where">普段は青、マウスを載せると赤い文字。</div>
-      <p>マウスを載せていない状態で選択・解析すると、現行の抽出結果には <code>:where(:hover)</code> のルールが入りません。出力先ではマウスを載せても青いままです。</p>
+      <p>期待結果：マウスを載せていない状態で解析しても、通常時の青いルールと <code>.where-target:where(:hover)</code> の赤いルールが出力されます。生成 HTML には <code>where-target</code> が残り、コピー先でもホバーすると赤くなります。</p>
     </section>
 
     <section>
