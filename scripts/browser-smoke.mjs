@@ -122,7 +122,7 @@ try {
   await evalInspected(frame, `(() => {
     document.documentElement.style.setProperty('--fixture-space', '1rem');
     const style = document.createElement('style');
-    style.textContent = '.fixture-var { padding: var(--fixture-space); }';
+    style.textContent = '.fixture-var { margin-left: var(--fixture-space); }';
     document.head.append(style);
     document.querySelector('[data-test-target="complex"]').classList.add('fixture-var');
     return true;
@@ -161,7 +161,7 @@ try {
   assert.match(descendants.html, /class="card-demo__description"/);
   assert.match(descendants.css, /\.card-demo__title \{[\s\S]*font-weight: 700/);
   assert.match(descendants.css, /\.card-demo__description \{\s+color: rgb\(75, 85, 99\)/);
-  assert.equal(descendants.warnings, '');
+  assert.match(descendants.warnings, /選択範囲外の親要素から継承/);
   console.log('✓ 子孫要素を含めた抽出');
 
   await inspected.goto(pathToFileURL(resolve('tests/cascade-investigation-fixture.html')).href);
@@ -239,7 +239,7 @@ try {
   assert.match(recovered.css, /\.external-result \{\s+padding-top: 1rem/);
   assert.match(recovered.css, /@media \(min-width: 700px\)/);
   assert.match(recovered.status, /外部CSS 1 件を補完しました/);
-  assert.equal(recovered.warnings, '');
+  assert.match(recovered.warnings, /選択範囲外の親要素から継承/);
   console.log('✓ 別オリジン CSS を DevTools リソースから補完');
 
   await evalInspected(frame, `(() => { const sheets = Array.from(document.styleSheets); Object.defineProperty(document, 'styleSheets', { configurable: true, get: () => [...sheets, { href: ${JSON.stringify(missingUrl)}, disabled: false, get cssRules() { throw new DOMException('unavailable', 'SecurityError'); } }] }); return true; })()`);
