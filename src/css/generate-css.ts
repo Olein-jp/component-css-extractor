@@ -160,6 +160,15 @@ export function generateOutput(snapshot: PageSnapshot, options: GenerateOptions)
     const examples = [...unresolvedDependencies].slice(0, 3).map((selector) => `「${selector}」`).join('、');
     warnings.push(`${unresolvedDependencies.size} 件のセレクタは選択範囲外の要素・状態に依存します（${examples}）。コピーしたHTMLだけではスタイルを再現できない場合があります。`);
   }
+  if (snapshot.inheritedRootColor) {
+    const inlineStyle = snapshot.nodes[0]?.attributes.style ?? '';
+    const hasInlineColor = /(?:^|;)\s*color\s*:/i.test(inlineStyle);
+    const hasOwnColor = snapshot.rules.some((rule) => rule.nodeId === '0' && rule.matchesCurrentState !== false
+      && ruleAllowed(rule, options) && rule.declarations.some((declaration) => declaration.property.toLowerCase() === 'color'));
+    if (!hasInlineColor && !hasOwnColor) {
+      warnings.push(`選択要素の色（${snapshot.inheritedRootColor}）は選択範囲外の親要素から継承されています。コピー先では色が変わる場合があります。`);
+    }
+  }
   const nodeById = new Map(nodes.map((node) => [node.id, node]));
   const missingByName = new Map<string, boolean>();
   const recoveredReferences = [...referencedProperties];

@@ -50,7 +50,7 @@
       <div class="inheritance-parent">
         <div class="inheritance-target" data-test-target="inheritance">紫で太字の文字。色は親要素から継承しています。</div>
       </div>
-      <p>子要素だけを選択すると、現行の抽出結果には太字のルールだけが入り、コピー先で紫色を再現できません。</p>
+      <p>期待結果：抽出CSSには <code>font-weight: 700</code> だけが含まれ、紫色が選択範囲外の親要素から継承されている旨の警告が表示されます。計算済みの紫色はCSSへ固定値として追加されません。</p>
     </section>
   </main>
 </body>

@@ -199,6 +199,17 @@ try {
   assert.equal(hoverColor, 'rgb(255, 0, 0)');
   console.log('✓ :where() 内の状態を通常時とホバー時に保持');
 
+  await inspected.goto(pathToFileURL(resolve('tests/cascade-investigation-fixture.html')).href);
+  await waitFor(() => evalInspected(frame, 'document.title').then((value) => value === cascadeTitle), '継承色のテストページ');
+  await select(frame, '[data-test-target="inheritance"]');
+  await setValue(frame, '#root-class', 'inheritance-result');
+  const inheritedColor = await analyze(frame);
+  assert.match(inheritedColor.css, /\.inheritance-result \{\s+font-weight: 700;/);
+  assert.doesNotMatch(inheritedColor.css, /color:/);
+  assert.match(inheritedColor.warnings, /選択範囲外の親要素から継承/);
+  assert.match(inheritedColor.warnings, /rgb\(128, 0, 128\)/);
+  console.log('✓ 選択範囲外から継承した色を警告');
+
   const css = await readFile(resolve('tests/cross-origin.css'));
   const cssOrigin = await serve((request, response) => {
     response.writeHead(200, { 'Content-Type': 'text/css' }); response.end(css);

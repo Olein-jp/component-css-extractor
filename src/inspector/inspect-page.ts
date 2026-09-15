@@ -42,6 +42,12 @@ function layerName(header: string): string | null {
   return /^@layer(?:\s+([^;{]+))?/i.exec(header.trim())?.[1]?.trim() ?? null;
 }
 
+function matchesCurrentState(element: Element, selector: string): boolean {
+  const withoutPseudoElement = selector.replace(/(?<!\\)::(?:before|after|marker|placeholder)$/i, '');
+  try { return element.matches(withoutPseudoElement); }
+  catch { return false; }
+}
+
 export function inspectPage(options: AnalyzeOptions, selected: Element | null, fallbackStylesheets: Record<string, string> = {}): PageSnapshot {
   const warnings: string[] = [];
   if (options.mode === 'selected' && selected?.nodeType !== 1) {
@@ -127,7 +133,8 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
                   matched = true;
                   rules.push({ nodeId: node.id, originalSelector: selector, suffix: '', specificity: 0,
                     contexts, declarations, sourceOrder: order, preserveSelector: true,
-                    externalDependency: needsOuterContext(node.id, matchSelector) });
+                    externalDependency: needsOuterContext(node.id, matchSelector),
+                    matchesCurrentState: matchesCurrentState(element, selector) });
                 } else if (hasSupportedState(matchSelector)) stateCouldNotBeEvaluated = true;
               } catch {
                 if (hasSupportedState(matchSelector)) stateCouldNotBeEvaluated = true;
@@ -150,7 +157,8 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
               catch { skippedSelectors++; continue; }
             }
             rules.push({ nodeId: id, originalSelector: selector, suffix: parts.suffix,
-              specificity: simpleSpecificity(parts.base), contexts, declarations, sourceOrder: order });
+              specificity: simpleSpecificity(parts.base), contexts, declarations, sourceOrder: order,
+              matchesCurrentState: element ? matchesCurrentState(element, selector) : undefined });
           }
         }
       } else if (rule.type === 3 && 'styleSheet' in rule) {
@@ -253,7 +261,15 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
     warnings.push(`${skippedStateSelectors.size} 件の状態セレクタは非アクティブ時の対象を安全に判定できないため省略しました（${examples}）。`);
   }
   const customPropertyValues: Record<string, Record<string, string>> = {};
+  let inheritedRootColor: string | undefined;
   if (options.mode === 'selected') {
+    const root = elements.get('0');
+    if (root?.parentElement && typeof getComputedStyle === 'function') {
+      try {
+        const color = getComputedStyle(root).color;
+        if (color && color === getComputedStyle(root.parentElement).color) inheritedRootColor = color;
+      } catch { /* 診断できない環境では警告を追加しません。 */ }
+    }
     const pending = rules.flatMap((sourceRule) => sourceRule.declarations.flatMap((declaration) =>
       varReferences(declaration.value).map((reference) => ({ nodeId: sourceRule.nodeId, name: reference.name }))));
     const visitedProperties = new Set<string>();
@@ -276,7 +292,7 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
   const selectedLabel = nodes[0] ? `<${nodes[0].tagName} class="${nodes[0].classes.join(' ')}">` : '';
   return { nodes, rules, warnings, selectedLabel, originalHtml: options.mode === 'selected' ? (selected as Element).outerHTML.slice(0, 100_000) : '',
     unreadableStylesheets, recoveredStylesheets, stylesheetDiagnostics, customPropertyValues,
-    layerOrder, layerOrderUncertain };
+    layerOrder, layerOrderUncertain, inheritedRootColor };
 }
 
 export function renderHtml(classes: Array<{ id: string; outputClass: string | null; removeClasses: string[] }>, selected: Element | null): string {

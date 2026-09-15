@@ -53,6 +53,34 @@ function snapshot(nodes: ElementNode[], rules: SourceRule[]): PageSnapshot {
 }
 
 describe('CSS生成', () => {
+  it('選択範囲外から継承したルート要素の色を警告し、CSSは変更しない', () => {
+    const page = { ...snapshot([node('0', ['target'])], [
+      rule('0', '.target', 'font-weight', '700', 0),
+    ]), inheritedRootColor: 'rgb(128, 0, 128)' };
+    const result = generateOutput(page, options);
+    expect(result.css).toBe('.card {\n  font-weight: 700;\n}');
+    expect(result.warnings.join(' ')).toContain('選択範囲外の親要素から継承');
+    expect(result.warnings.join(' ')).toContain('rgb(128, 0, 128)');
+  });
+
+  it('ルート要素自身の有効なルールに色があれば継承色を警告しない', () => {
+    const colorRule = { ...rule('0', '.target', 'color', 'purple', 0), matchesCurrentState: true };
+    const page = { ...snapshot([node('0', ['target'])], [colorRule]), inheritedRootColor: 'rgb(128, 0, 128)' };
+    expect(generateOutput(page, options).warnings).toEqual([]);
+  });
+
+  it('現在一致しない状態ルールだけでは継承色の警告を抑止しない', () => {
+    const hoverRule = { ...rule('0', '.target:hover', 'color', 'red', 0, [], false, ':hover'), matchesCurrentState: false };
+    const page = { ...snapshot([node('0', ['target'])], [hoverRule]), inheritedRootColor: 'rgb(128, 0, 128)' };
+    expect(generateOutput(page, options).warnings.join(' ')).toContain('選択範囲外の親要素から継承');
+  });
+
+  it('ルート要素のインラインスタイルに色があれば継承色を警告しない', () => {
+    const root = { ...node('0', ['target']), attributes: { style: 'font-weight: 700; color: purple' } };
+    const page = { ...snapshot([root], []), inheritedRootColor: 'rgb(128, 0, 128)' };
+    expect(generateOutput(page, options).warnings.join(' ')).not.toContain('選択範囲外の親要素から継承');
+  });
+
   it('外側のrootにしかない変数定義への依存を警告する', () => {
     const page = snapshot([node('0', ['sample'])], [rule('0', '.sample', 'padding', 'var(--space)', 0)]);
     const result = generateOutput(page, { ...options, rootClass: 'sample' });
@@ -272,6 +300,20 @@ describe('セレクタ解析', () => {
 
 describe('CSSOM収集', () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it('選択ルートと親要素の計算済み色が同じ場合に継承色の候補を記録する', () => {
+    const parent = { nodeType: 1 } as unknown as Element;
+    const ownerDocument = { styleSheets: [] };
+    const selected = {
+      nodeType: 1, tagName: 'DIV', classList: ['target'],
+      attributes: [{ name: 'class', value: 'target' }], children: [], ownerDocument,
+      parentElement: parent, outerHTML: '<div class="target"></div>',
+      cloneNode: () => ({ matches: () => true }),
+    } as unknown as Element;
+    vi.stubGlobal('getComputedStyle', () => ({ color: 'rgb(128, 0, 128)', getPropertyValue: () => '' }));
+    const page = inspectPage({ mode: 'selected', includeDescendants: false, manualClasses: [] }, selected);
+    expect(page.inheritedRootColor).toBe('rgb(128, 0, 128)');
+  });
 
   it('複数シートをまたぐレイヤーの初出順と対象ルールを収集する', () => {
     const style = (value: string, important = '') => ({ type: 1, cssText: `.target { color: ${value}; }`, selectorText: '.target',

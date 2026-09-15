@@ -32,6 +32,7 @@ export interface SourceRule {
   sourceOrder: number;
   preserveSelector?: boolean;
   externalDependency?: boolean;
+  matchesCurrentState?: boolean;
 }
 
 export interface PageSnapshot {
@@ -45,6 +46,7 @@ export interface PageSnapshot {
   customPropertyValues?: Record<string, Record<string, string>>;
   layerOrder?: string[];
   layerOrderUncertain?: boolean;
+  inheritedRootColor?: string;
   stylesheetDiagnostics?: StylesheetDiagnostic[];
 }
 
