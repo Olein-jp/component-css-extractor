@@ -30,7 +30,7 @@
     <section>
       <h2>1. レイヤーの順序</h2>
       <div class="layer-target" data-test-target="layer">青い文字。元 CSS では first より second が優先されます。</div>
-      <p>現行の抽出結果は <code>@layer first, second;</code> を含まず、second と first のブロックだけになります。その CSS を別ページに貼るとレイヤー順が逆転して赤くなります。</p>
+      <p>期待結果：抽出 CSS の先頭に <code>@layer first, second;</code> があり、second と first のブロックが続きます。その CSS を別ページに貼っても青い表示を再現できます。</p>
     </section>
 
     <section>

@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Component CSS Extractor @layer テスト</title>
+  <style>
+    body { max-width: 54rem; margin: 2rem auto; padding: 0 1rem; font-family: system-ui, sans-serif; line-height: 1.6; }
+    section { margin: 2rem 0; padding-top: 1rem; border-top: 1px solid #ccc; }
+    [data-test-target] { display: block; margin: 1rem 0; padding: 1rem; outline: 2px dashed #888; outline-offset: 4px; }
+    textarea { box-sizing: border-box; display: block; width: 100%; min-height: 12rem; margin: 1rem 0; font: 0.9rem monospace; }
+    iframe { box-sizing: border-box; width: 100%; min-height: 5rem; margin-top: 1rem; border: 1px solid #888; }
+    code { background: #f1f1f1; padding: 0.1em 0.25em; }
+
+    /* テスト1：通常宣言では後ろのレイヤーが優先されるため青になります。 */
+    @layer normal-first, normal-second;
+    @layer normal-second { .layer-normal-target { color: blue; } }
+  </style>
+  <style>
+    /* 別のスタイルシートにあるレイヤーブロックとして扱われます。 */
+    @layer normal-first { .layer-normal-target { color: red; } }
+  </style>
+  <style>
+    /* テスト2：!importantではレイヤー順が反転するため赤になります。 */
+    @layer important-first, important-second;
+    @layer important-second { .layer-important-target { color: blue !important; } }
+  </style>
+  <style>
+    @layer important-first { .layer-important-target { color: red !important; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Component CSS Extractor @layer テスト</h1>
+    <p>この HTML ファイルを Chrome で直接開いてください。サーバーやインターネット接続は不要です。拡張を再ビルドした場合は、<code>chrome://extensions</code> で拡張を再読み込みし、DevTools も開き直してください。</p>
+
+    <section>
+      <h2>1. 通常のレイヤー順</h2>
+      <ol>
+        <li>下の青い要素を右クリックして「検証」を選びます。</li>
+        <li>CSS Extractor を「Elementsで選択」「選択要素のみ」にします。</li>
+        <li>ルートのクラス名を <code>layer-normal-result</code> にし、<code>@layer</code> をオンにして解析します。</li>
+        <li>「CSSをコピー」で結果を下の欄へ貼り付け、「貼り付けたCSSを表示」を押します。</li>
+      </ol>
+      <div class="layer-normal-target" data-test-target="layer-normal">テスト対象1：元ページでは青い文字</div>
+      <p>期待結果：CSS の先頭に <code>@layer normal-first, normal-second</code> を含む順序宣言があり、プレビューも青い文字になります。このページ内の別テスト用レイヤー名が同じ順序宣言に含まれていても正常です。</p>
+      <label for="normal-css">抽出したCSS</label>
+      <textarea id="normal-css" spellcheck="false" placeholder="CSS Extractor の「CSSをコピー」で取得した内容を貼り付けます"></textarea>
+      <button type="button" data-render="normal">貼り付けたCSSを表示</button>
+      <p id="normal-status" role="status"></p>
+      <iframe id="normal-preview" title="通常レイヤーのプレビュー" sandbox="allow-same-origin"></iframe>
+    </section>
+
+    <section>
+      <h2>2. 複数スタイルシートと !important</h2>
+      <ol>
+        <li>下の赤い要素を右クリックして「検証」を選びます。</li>
+        <li>設定は「Elementsで選択」「選択要素のみ」、ルートのクラス名は <code>layer-important-result</code>、<code>@layer</code> はオンにします。</li>
+        <li>解析した CSS を下の欄へ貼り付けて表示します。</li>
+      </ol>
+      <div class="layer-important-target" data-test-target="layer-important">テスト対象2：元ページでは赤い文字</div>
+      <p>期待結果：<code>important-first</code> が <code>important-second</code> より先に宣言され、両方の <code>!important</code> が残ります。重要宣言ではレイヤーの優先順位が反転するため、プレビューも赤い文字になります。</p>
+      <label for="important-css">抽出したCSS</label>
+      <textarea id="important-css" spellcheck="false" placeholder="CSS Extractor の「CSSをコピー」で取得した内容を貼り付けます"></textarea>
+      <button type="button" data-render="important">貼り付けたCSSを表示</button>
+      <p id="important-status" role="status"></p>
+      <iframe id="important-preview" title="importantレイヤーのプレビュー" sandbox="allow-same-origin"></iframe>
+    </section>
+
+    <section>
+      <h2>3. @layer を含めない設定</h2>
+      <ol>
+        <li>テスト対象1または2を選択したまま、CSS Extractor の「<code>@layer</code>」をオフにします。</li>
+        <li>もう一度解析します。</li>
+      </ol>
+      <p>期待結果：抽出 CSS にレイヤーブロックも <code>@layer …;</code> の順序宣言も残りません。このページの対象要素はレイヤー内にしか CSS がないため、「一致するCSSがありません」と表示されても正常です。</p>
+    </section>
+  </main>
+  <script>
+    const previews = {
+      normal: { className: 'layer-normal-result', expected: 'rgb(0, 0, 255)' },
+      important: { className: 'layer-important-result', expected: 'rgb(255, 0, 0)' },
+    };
+    document.querySelectorAll('[data-render]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const name = button.dataset.render;
+        const config = previews[name];
+        const css = document.getElementById(`${name}-css`).value;
+        const preview = document.getElementById(`${name}-preview`);
+        const status = document.getElementById(`${name}-status`);
+        if (!css.includes('@layer') || !css.includes(`.${config.className}`)) {
+          status.textContent = '指定したルートクラス名で解析したCSSを貼り付けてください。';
+          return;
+        }
+        preview.onload = () => {
+          const style = preview.contentDocument.createElement('style');
+          style.textContent = css;
+          preview.contentDocument.head.append(style);
+          const color = preview.contentWindow.getComputedStyle(preview.contentDocument.querySelector('[data-preview]')).color;
+          status.textContent = color === config.expected
+            ? `成功：プレビューの文字色は ${color} です。`
+            : `要確認：期待した文字色ではありません（現在 ${color}）。`;
+        };
+        preview.srcdoc = `<!doctype html><html><head></head><body><div class="${config.className}" data-preview>コピー先の表示</div></body></html>`;
+      });
+    });
+  </script>
+</body>
+</html>

@@ -209,6 +209,31 @@ describe('CSS生成', () => {
     expect(result.css).toContain('@supports (display: grid) {\n  @container (min-width: 500px) {');
   });
 
+  it('レイヤーの初出順を宣言し、importantでも同じ順序を保持する', () => {
+    const second: RuleContext[] = [{ type: 'layer', header: '@layer second' }];
+    const first: RuleContext[] = [{ type: 'layer', header: '@layer first' }];
+    const page = { ...snapshot([node('0', ['target'])], [
+      rule('0', '.target', 'color', 'blue', 0, second, true),
+      rule('0', '.target', 'color', 'red', 1, first, true),
+    ]), layerOrder: ['first', 'second'] };
+    const result = generateOutput(page, options);
+    expect(result.css).toMatch(/^@layer first, second;/);
+    expect(result.css).toContain('@layer second {\n  .card {\n    color: blue !important;');
+    expect(result.css).toContain('@layer first {\n  .card {\n    color: red !important;');
+    expect(result.warnings).toEqual([]);
+
+    const withoutLayers = generateOutput(page, { ...options, includeLayer: false });
+    expect(withoutLayers.css).not.toContain('@layer');
+  });
+
+  it('匿名レイヤーの順序を再構成できない場合は警告する', () => {
+    const page = { ...snapshot([node('0', ['target'])], [
+      rule('0', '.target', 'color', 'red', 0, [{ type: 'layer', header: '@layer' }]),
+    ]), layerOrderUncertain: true };
+    const result = generateOutput(page, options);
+    expect(result.warnings.join(' ')).toContain('レイヤーの優先順位が変わる場合があります');
+  });
+
   it('文脈が間に入る宣言を順序を崩して統合しない', () => {
     const media: RuleContext[] = [{ type: 'media', header: '@media (min-width: 1px)' }];
     const result = generateOutput(snapshot([node('0', ['foo'])], [
@@ -237,6 +262,24 @@ describe('セレクタ解析', () => {
 
 describe('CSSOM収集', () => {
   afterEach(() => vi.unstubAllGlobals());
+
+  it('複数シートをまたぐレイヤーの初出順と対象ルールを収集する', () => {
+    const style = (value: string, important = '') => ({ type: 1, cssText: `.target { color: ${value}; }`, selectorText: '.target',
+      style: { length: 1, item: () => 'color', getPropertyValue: () => value, getPropertyPriority: () => important } });
+    const sheets = [
+      { disabled: false, cssRules: [
+        { type: 0, cssText: '@layer first, second;' },
+        { type: 0, cssText: '@layer second { .target { color: blue !important; } }', cssRules: [style('blue', 'important')] },
+      ] },
+      { disabled: false, cssRules: [
+        { type: 0, cssText: '@layer first { .target { color: red !important; } }', cssRules: [style('red', 'important')] },
+      ] },
+    ];
+    vi.stubGlobal('document', { styleSheets: sheets });
+    const page = inspectPage({ mode: 'manual', includeDescendants: false, manualClasses: ['target'] }, null);
+    expect(page.layerOrder).toEqual(['first', 'second']);
+    expect(generateOutput(page, options).css).toMatch(/^@layer first, second;/);
+  });
 
   it('実DOMでは一致するが選択範囲の複製では一致しない親条件を検出する', () => {
     const selector = '.wrapper > .sample[data-state="ready"]';

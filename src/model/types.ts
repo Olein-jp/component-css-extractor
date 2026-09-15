@@ -43,6 +43,8 @@ export interface PageSnapshot {
   unreadableStylesheets?: string[];
   recoveredStylesheets?: number;
   customPropertyValues?: Record<string, Record<string, string>>;
+  layerOrder?: string[];
+  layerOrderUncertain?: boolean;
   stylesheetDiagnostics?: StylesheetDiagnostic[];
 }
 

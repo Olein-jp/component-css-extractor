@@ -106,6 +106,7 @@ export function generateOutput(snapshot: PageSnapshot, options: GenerateOptions)
   }
   const blocks: string[] = [];
   const variableBlocks: string[] = [];
+  let hasLayerRules = false;
   const unresolvedDependencies = new Set<string>();
   const definedProperties = new Map<string, Set<string>>();
   const referencedProperties: Array<{ nodeId: string; name: string; hasFallback: boolean }> = [];
@@ -141,6 +142,7 @@ export function generateOutput(snapshot: PageSnapshot, options: GenerateOptions)
       }
       if (variables.size) variableBlocks.push(renderSegment({ ...segment, declarations: variables }));
       if (declarations.size) blocks.push(renderSegment({ ...segment, declarations }));
+      if ((variables.size || declarations.size) && segment.contexts.some((context) => context.type === 'layer')) hasLayerRules = true;
       for (const declaration of segment.declarations.values()) {
         if (declaration.property.startsWith('--')) {
           const names = definedProperties.get(node.id) ?? new Set<string>();
@@ -202,6 +204,12 @@ export function generateOutput(snapshot: PageSnapshot, options: GenerateOptions)
   }
   if (!blocks.length && !variableBlocks.length) warnings.push('一致するCSSルールが見つかりませんでした。');
   const cssBlocks = [...variableBlocks, ...blocks];
+  if (options.includeLayer && hasLayerRules) {
+    if (snapshot.layerOrder?.length) cssBlocks.unshift(`@layer ${snapshot.layerOrder.join(', ')};`);
+    if (snapshot.layerOrderUncertain || !snapshot.layerOrder?.length) {
+      warnings.push('匿名レイヤーなどの順序を安全に再構成できませんでした。コピー先ではレイヤーの優先順位が変わる場合があります。');
+    }
+  }
   return { css: cssBlocks.join('\n\n'), html: snapshot.originalHtml, warnings, nodes,
     recoveredCustomProperties: [...recoveredVariables.values()].reduce((total, values) => total + values.size, 0) };
 }

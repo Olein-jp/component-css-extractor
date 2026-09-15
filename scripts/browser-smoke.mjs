@@ -6,6 +6,7 @@ import { pathToFileURL } from 'node:url';
 import puppeteer from 'puppeteer-core';
 
 const fixtureTitle = 'Component CSS Extractor 機能テスト';
+const cascadeTitle = 'CSS Cascade 調査用ページ';
 const externalTitle = 'Component CSS Extractor 外部 CSS 自動テスト';
 const missingUrl = 'https://example.invalid/component-css-extractor-missing.css';
 const servers = [];
@@ -162,6 +163,23 @@ try {
   assert.match(descendants.css, /\.card-demo__description \{\s+color: rgb\(75, 85, 99\)/);
   assert.equal(descendants.warnings, '');
   console.log('✓ 子孫要素を含めた抽出');
+
+  await inspected.goto(pathToFileURL(resolve('tests/cascade-investigation-fixture.html')).href);
+  await waitFor(() => evalInspected(frame, 'document.title').then((value) => value === cascadeTitle), 'Cascade テストページ');
+  await select(frame, '[data-test-target="layer"]');
+  await frame.$eval('input[name="scope"][value="single"]', (input) => input.click());
+  await setValue(frame, '#root-class', 'component-test');
+  const layered = await analyze(frame);
+  assert.match(layered.css, /^@layer first, second;/);
+  assert.match(layered.css, /@layer second/);
+  assert.match(layered.css, /@layer first/);
+  const reproducedColor = await evalInspected(frame, `(() => {
+    document.head.replaceChildren(); document.body.innerHTML = '<div class="component-test">layer</div>';
+    const style = document.createElement('style'); style.textContent = ${JSON.stringify(layered.css)}; document.head.append(style);
+    return getComputedStyle(document.querySelector('.component-test')).color;
+  })()`);
+  assert.equal(reproducedColor, 'rgb(0, 0, 255)');
+  console.log('✓ @layer の順序と表示色を保持');
 
   const css = await readFile(resolve('tests/cross-origin.css'));
   const cssOrigin = await serve((request, response) => {

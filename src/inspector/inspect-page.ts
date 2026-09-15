@@ -38,6 +38,10 @@ function hasNestedRules(rule: CSSRule): rule is CSSRule & { cssRules: CSSRuleLis
   return 'cssRules' in rule && typeof (rule as CSSRule & { cssRules?: unknown }).cssRules === 'object';
 }
 
+function layerName(header: string): string | null {
+  return /^@layer(?:\s+([^;{]+))?/i.exec(header.trim())?.[1]?.trim() ?? null;
+}
+
 export function inspectPage(options: AnalyzeOptions, selected: Element | null, fallbackStylesheets: Record<string, string> = {}): PageSnapshot {
   const warnings: string[] = [];
   if (options.mode === 'selected' && selected?.nodeType !== 1) {
@@ -63,8 +67,17 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
   const unresolvedImports = new Set<string>();
   const unsupportedImports = new Set<string>();
   const cyclicImports = new Set<string>();
+  const layerOrder: string[] = [];
+  const knownLayers = new Set<string>();
+  let layerOrderUncertain = false;
   const visitedSheets = new Set<CSSStyleSheet>();
   let detachedRoot: Element | null | undefined;
+  function registerLayer(name: string | null, contexts: RuleContext[]): void {
+    const parents = contexts.filter((context) => context.type === 'layer').map((context) => layerName(context.header));
+    if (!name || parents.some((parent) => !parent)) { layerOrderUncertain = true; return; }
+    const qualified = [...parents.filter((parent): parent is string => Boolean(parent)), name].join('.');
+    if (!knownLayers.has(qualified)) { knownLayers.add(qualified); layerOrder.push(qualified); }
+  }
   function needsOuterContext(nodeId: string, selector: string): boolean {
     if (options.mode !== 'selected') return false;
     if (detachedRoot === undefined) {
@@ -79,7 +92,10 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
   }
   function traverse(list: CSSRuleList, contexts: RuleContext[], onMarker?: (selector: string, contexts: RuleContext[]) => boolean): void {
     for (const rule of Array.from(list)) {
-      if (rule.type === 1 && 'selectorText' in rule && 'style' in rule) {
+      const layerStatement = typeof rule.cssText === 'string' ? /^@layer\s+([^;{]+)\s*;/i.exec(rule.cssText.trim()) : null;
+      if (layerStatement) {
+        for (const name of layerStatement[1].split(',').map((item) => item.trim()).filter(Boolean)) registerLayer(name, contexts);
+      } else if (rule.type === 1 && 'selectorText' in rule && 'style' in rule) {
         const styleRule = rule as CSSStyleRule;
         if (onMarker?.(styleRule.selectorText, contexts)) continue;
         const order = sourceOrder++;
@@ -129,10 +145,15 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
         const importRule = rule as CSSImportRule;
         const imported = importRule.styleSheet;
         const media = importRule.media?.mediaText?.trim();
-        const importContexts: RuleContext[] = media && media !== 'all' ? [...contexts, { type: 'media', header: `@media ${media}` }] : contexts;
+        const importedLayer = (importRule as CSSImportRule & { layerName?: string }).layerName?.trim();
+        if (importedLayer) registerLayer(importedLayer, contexts);
+        let importContexts: RuleContext[] = importedLayer ? [...contexts, { type: 'layer', header: `@layer ${importedLayer}` }] : contexts;
+        if (media && media !== 'all') importContexts = [...importContexts, { type: 'media', header: `@media ${media}` }];
         if (imported) visitSheet(imported, importContexts);
       } else if (hasNestedRules(rule)) {
-        traverse(rule.cssRules, [...contexts, contextFor(rule)], onMarker);
+        const context = contextFor(rule);
+        if (context.type === 'layer') registerLayer(layerName(context.header), contexts);
+        traverse(rule.cssRules, [...contexts, context], onMarker);
       }
     }
   }
@@ -238,7 +259,8 @@ export function inspectPage(options: AnalyzeOptions, selected: Element | null, f
   }
   const selectedLabel = nodes[0] ? `<${nodes[0].tagName} class="${nodes[0].classes.join(' ')}">` : '';
   return { nodes, rules, warnings, selectedLabel, originalHtml: options.mode === 'selected' ? (selected as Element).outerHTML.slice(0, 100_000) : '',
-    unreadableStylesheets, recoveredStylesheets, stylesheetDiagnostics, customPropertyValues };
+    unreadableStylesheets, recoveredStylesheets, stylesheetDiagnostics, customPropertyValues,
+    layerOrder, layerOrderUncertain };
 }
 
 export function renderHtml(classes: Array<{ id: string; outputClass: string | null; removeClasses: string[] }>, selected: Element | null): string {
